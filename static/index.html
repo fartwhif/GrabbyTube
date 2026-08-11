@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GrabbyTube</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>GrabbyTube</h1>
+    <p class="subtitle">Search &rarr; Queue &rarr; MP3</p>
+    <div class="stats">
+      <span id="track-count">0 tracks</span>
+      <span id="queue-count">0 queued</span>
+    </div>
+  </header>
+
+  <!-- Search -->
+  <section id="search-section">
+    <h2>Search</h2>
+    <form id="search-form">
+      <input type="text" id="search-input" placeholder="Enter song name..." autocomplete="off" required>
+      <button type="submit" id="search-btn">Search</button>
+    </form>
+    <div id="search-results" class="results-list"></div>
+  </section>
+
+  <!-- Queue -->
+  <section id="queue-section">
+    <h2>Queue <span id="queue-badge"></span></h2>
+    <div id="job-list" class="results-list"></div>
+  </section>
+
+  <!-- Tracks -->
+  <section id="tracks-section">
+    <h2>
+      Library
+      <select id="sort-select">
+        <option value="date_added">Date Added</option>
+        <option value="title">Title</option>
+        <option value="artist">Artist</option>
+        <option value="duration">Duration</option>
+        <option value="filesize">File Size</option>
+      </select>
+    </h2>
+    <div id="track-list" class="results-list"></div>
+  </section>
+</div>
+
+<!-- Audio player -->
+<div id="player-bar">
+  <span id="player-title"></span>
+  <audio id="player" controls></audio>
+</div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>
