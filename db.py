@@ -6,7 +6,7 @@ from pathlib import Path
 from config import PROJECT_ROOT
 
 DB_PATH = PROJECT_ROOT / "grabbytube.db"
-CATALOG_PATH = PROJECT_ROOT / "tracks.json"
+CATALOG_PATH = PROJECT_ROOT / "grabby-tracks.json"
 
 
 def get_conn() -> sqlite3.Connection:
@@ -43,7 +43,7 @@ def init_db():
 def is_video_exists(video_id: str) -> bool:
     """Check if a video_id is already downloaded (in catalog)."""
     catalog = load_catalog()
-    return any(t.get("video_id") == video_id for t in catalog)
+    return any(t.get("videoId") == video_id for t in catalog)
 
 
 def is_video_queued(video_id: str) -> bool:
@@ -134,21 +134,21 @@ def save_catalog(tracks: list[dict]):
 
 def add_track(track: dict):
     catalog = load_catalog()
-    # Avoid duplicates by video_id
-    catalog = [t for t in catalog if t.get("video_id") != track.get("video_id")]
+    # Avoid duplicates by videoId
+    catalog = [t for t in catalog if t.get("videoId") != track.get("videoId")]
     catalog.append(track)
     save_catalog(catalog)
 
 
-def list_tracks(sort_by: str = "date_added", reverse: bool = True) -> list[dict]:
+def list_tracks(sort_by: str = "createdAt", reverse: bool = True) -> list[dict]:
     catalog = load_catalog()
     key_map = {
         "title": lambda t: t.get("title", "").lower(),
-        "artist": lambda t: t.get("artist", "").lower(),
-        "date_added": lambda t: t.get("date_added", ""),
+        "author": lambda t: t.get("author", "").lower(),
+        "createdAt": lambda t: t.get("createdAt", ""),
+        "publishedAt": lambda t: t.get("publishedAt", ""),
         "duration": lambda t: t.get("duration", 0),
-        "filesize": lambda t: t.get("filesize", 0),
     }
-    key_fn = key_map.get(sort_by, key_map["date_added"])
+    key_fn = key_map.get(sort_by, key_map["createdAt"])
     catalog.sort(key=key_fn, reverse=reverse)
     return catalog

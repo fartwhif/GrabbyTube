@@ -18,9 +18,9 @@ logger = logging.getLogger("grabbytube.processor")
 
 
 def update_index_file():
-    """Rebuild output/index.json from all per-item metadata JSONs (DrivePod-style)."""
+    """Rebuild output/grabby-index.json from all per-item metadata JSONs (DrivePod-style)."""
     output_dir = settings.output_path
-    index_path = output_dir / "index.json"
+    index_path = output_dir / "grabby-index.json"
     items = []
     for subdir in sorted(output_dir.iterdir()):
         if not subdir.is_dir():
@@ -32,7 +32,7 @@ def update_index_file():
                 items.append(data)
             except (json.JSONDecodeError, OSError):
                 pass
-    items.sort(key=lambda t: t.get("date_added", ""), reverse=True)
+    items.sort(key=lambda t: t.get("createdAt", ""), reverse=True)
     index_path.write_text(json.dumps(items, indent=2, ensure_ascii=False))
     logger.info(f"Index rebuilt: {len(items)} items -> {index_path}")
 
@@ -243,26 +243,17 @@ async def process_job(jid: int):
         except OSError:
             pass
 
-        # Write per-item metadata JSON (like DrivePod)
+        # Write per-item metadata JSON (DrivePod-compatible schema)
         track_entry = {
-            "video_id": video_id,
+            "videoId": video_id,
+            "channelId": info.get("channel_id", "") if isinstance(info, dict) else "",
             "title": meta.get("title") or job.get("title", ""),
-            "artist": meta.get("artist") or ffprobe_meta.get("artist", ""),
-            "album": meta.get("album", ""),
-            "genre": meta.get("genre", ""),
-            "year": meta.get("date", ffprobe_meta.get("date", ""))[:4],
+            "author": meta.get("artist") or ffprobe_meta.get("artist", ""),
+            "publishedAt": info.get("upload_date", "") if isinstance(info, dict) else "",
+            "thumbnailPath": f"{video_id}/{video_id}-small.webp" if thumb_path else None,
+            "audioPath": f"{video_id}/{video_id}.mp3",
             "duration": meta.get("duration", 0),
-            "filesize": meta.get("filesize", 0),
-            "codec": meta.get("codec", "mp3"),
-            "bitrate": meta.get("bitrate", 0),
-            "sample_rate": meta.get("sample_rate", 0),
-            "channels": meta.get("channels", 0),
-            "bits_per_sample": meta.get("bits_per_sample", 0),
-            "file_encoding": "ID3v2.3",
-            "audio_path": f"{video_id}/{video_id}.mp3",
-            "thumbnail_path": f"{video_id}/{video_id}-small.webp" if thumb_path else None,
-            "source_url": job.get("url", ""),
-            "date_added": datetime.now(timezone.utc).isoformat(),
+            "createdAt": datetime.now(timezone.utc).isoformat(),
         }
         json_path = video_dir / f"{video_id}.json"
         json_path.write_text(json.dumps(track_entry, indent=2, ensure_ascii=False))

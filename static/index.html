@@ -38,6 +38,9 @@
   <!-- Queue -->
   <section id="queue-section">
     <h2>Queue <span id="queue-badge"></span></h2>
+    <div class="queue-actions">
+      <button class="btn btn-secondary btn-clear-jobs" id="clear-jobs-btn">Clear Done/Failed</button>
+    </div>
     <div id="job-list" class="results-list"></div>
   </section>
 
@@ -46,11 +49,11 @@
     <h2>
       Library
       <select id="sort-select">
-        <option value="date_added">Date Added</option>
+        <option value="createdAt">Date Added</option>
         <option value="title">Title</option>
-        <option value="artist">Artist</option>
+        <option value="author">Author</option>
+        <option value="publishedAt">Published</option>
         <option value="duration">Duration</option>
-        <option value="filesize">File Size</option>
       </select>
     </h2>
     <div id="track-list" class="results-list"></div>
@@ -63,6 +66,6 @@
   <audio id="player" controls></audio>
 </div>
 
-<script src="/static/js/app.js"></script>
+<script src="/static/js/app.js?v=2"></script>
 </body>
 </html>

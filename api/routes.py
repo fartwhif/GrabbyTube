@@ -46,7 +46,7 @@ class BatchQueueRequest(BaseModel):
 
 
 class TrackListRequest(BaseModel):
-    sort_by: str = "date_added"
+    sort_by: str = "createdAt"
     reverse: bool = True
 
 
@@ -170,10 +170,24 @@ async def get_job_detail(jid: int):
     return job
 
 
+@router.delete("/jobs")
+async def clear_jobs():
+    """Clear all completed and failed jobs from the queue."""
+    from db import get_conn
+    conn = get_conn()
+    cur = conn.execute(
+        "DELETE FROM jobs WHERE status IN ('completed', 'failed', 'transcoding', 'downloading', 'running')"
+    )
+    deleted = cur.rowcount
+    conn.commit()
+    conn.close()
+    return {"cleared": deleted}
+
+
 # --- Tracks catalog ---
 
 @router.get("/tracks")
-async def get_tracks(sort_by: str = "date_added", reverse: bool = True):
+async def get_tracks(sort_by: str = "createdAt", reverse: bool = True):
     """List all cataloged tracks."""
     return list_tracks(sort_by=sort_by, reverse=reverse)
 
@@ -186,8 +200,8 @@ async def get_track_count():
 
 @router.get("/tracks/file")
 async def get_tracks_json():
-    """Download the raw tracks.json."""
-    catalog_path = Path("tracks.json")
+    """Download the raw grabby-tracks.json."""
+    catalog_path = Path("grabby-tracks.json")
     if not catalog_path.exists():
         return {"tracks": []}
     return json.loads(catalog_path.read_text())
@@ -201,17 +215,16 @@ async def rebuild_tracks():
     catalog = load_catalog()
     updated = 0
     for track in catalog:
-        # New structure: audio_path is relative (e.g. "fJ9rUzIMcZQ/fJ9rUzIMcZQ.mp3")
-        audio_rel = track.get("audio_path") or track.get("filepath", "")
+        # DrivePod-compatible: audioPath is relative (e.g. "fJ9rUzIMcZQ/fJ9rUzIMcZQ.mp3")
+        audio_rel = track.get("audioPath") or track.get("audio_path", "")
         fp = settings.output_path / audio_rel if "/" in audio_rel else Path(audio_rel)
         if not fp.exists():
             # Fallback: try as absolute path (legacy)
             fp = Path(audio_rel)
         if fp.exists():
             meta = await _get_audio_metadata(fp)
-            for key in ("duration", "filesize", "codec", "bitrate", "sample_rate", "channels", "bits_per_sample"):
-                if meta.get(key):
-                    track[key] = meta[key]
+            if meta.get("duration"):
+                track["duration"] = meta["duration"]
             updated += 1
     save_catalog(catalog)
     return {"rebuilt": updated, "total": len(catalog)}
@@ -267,7 +280,7 @@ async def delete_track(video_id: str):
 
     # Remove from catalog
     catalog = load_catalog()
-    new_catalog = [t for t in catalog if t.get("video_id") != video_id]
+    new_catalog = [t for t in catalog if t.get("videoId") != video_id]
     if len(new_catalog) == len(catalog):
         raise HTTPException(404, "Track not found")
     save_catalog(new_catalog)

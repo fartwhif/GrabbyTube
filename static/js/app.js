@@ -162,24 +162,20 @@ async function refreshTracks() {
     }
 
     trackList.innerHTML = tracks.map(t => `
-      <div class="track-card" id="track-${esc(t.video_id)}">
+      <div class="track-card" id="track-${esc(t.videoId)}">
         <div class="track-info">
           <div class="track-title">${esc(t.title)}</div>
           <div class="track-meta">
-            ${esc(t.artist)} &middot; ${fmtDuration(t.duration)} &middot; ${fmtSize(t.filesize)}
-            &middot; ${t.bitrate ? t.bitrate + 'bps' : ''}
-            &middot; ${t.channels || '?'}ch
-            &middot; ${t.codec || 'mp3'}
-            ${t.genre ? `&middot; ${esc(t.genre)}` : ''}
+            ${esc(t.author)} &middot; ${fmtDuration(t.duration)}
           </div>
         </div>
         <div class="actions">
           <button class="btn btn-play btn-play-track"
-            data-video-id="${escAttr(t.video_id)}"
+            data-video-id="${escAttr(t.videoId)}"
             data-title="${escAttr(t.title)}">Play</button>
-          <a class="btn btn-secondary" href="${API}/audio/${encodeURIComponent(t.video_id)}" download>DL</a>
+          <a class="btn btn-secondary" href="${API}/audio/${encodeURIComponent(t.videoId)}" download>DL</a>
           <button class="btn btn-danger btn-delete-track"
-            data-video-id="${escAttr(t.video_id)}"
+            data-video-id="${escAttr(t.videoId)}"
             data-title="${escAttr(t.title)}">Del</button>
         </div>
       </div>
@@ -194,6 +190,20 @@ sortSelect.addEventListener('change', refreshTracks);
 // --- Event delegation ---
 
 document.addEventListener('click', async (e) => {
+  // Clear jobs button
+  const clearBtn = e.target.closest('#clear-jobs-btn');
+  if (clearBtn) {
+    e.preventDefault();
+    try {
+      const res = await api('/jobs', { method: 'DELETE' });
+      refreshJobs();
+      refreshStats();
+    } catch (err) {
+      alert('Clear failed: ' + err.message);
+    }
+    return;
+  }
+
   // Queue button (search results)
   const queueBtn = e.target.closest('.btn-queue');
   if (queueBtn) {
