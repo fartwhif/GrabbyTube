@@ -15,6 +15,12 @@ function fmtSize(b) {
   return `${(b / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function fmtUploadDate(d) {
+  if (!d || d.length < 8) return '';
+  const y = d.slice(0, 4), mo = d.slice(4, 6), dy = d.slice(6, 8);
+  return `${y}-${mo}-${dy}`;
+}
+
 function api(path, opts = {}) {
   return fetch(`${API}${path}`, {
     headers: { 'Content-Type': 'application/json', ...opts.headers },
@@ -39,6 +45,7 @@ searchForm.addEventListener('submit', async (e) => {
 
   searchBtn.disabled = true;
   searchBtn.textContent = 'Searching...';
+  searchInput.value = '';
   searchResults.innerHTML = '<div class="empty-msg"><span class="spinner"></span> Searching...</div>';
 
   try {
@@ -52,15 +59,18 @@ searchForm.addEventListener('submit', async (e) => {
       return;
     }
 
-    searchResults.innerHTML = results.map(r => `
+    searchResults.innerHTML = `<div class="search-query">Results for: <strong>${esc(q)}</strong></div>` + results.map(r => `
       <div class="result-card">
         <img class="thumb" src="${esc(r.thumbnail)}" alt="" loading="lazy">
         <div class="info">
-          <div class="title">${esc(r.title)}</div>
+          <a class="title yt-link" href="${escAttr(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>
           <div class="meta">${esc(r.uploader)} &middot; ${fmtDuration(r.duration)}</div>
         </div>
         <div class="actions">
-          <button class="btn btn-primary" onclick="queueTrack('${esc(r.id)}', '${esc(r.title.replace(/'/g, "\\'"))}', '${esc(r.url)}')">
+          <button class="btn btn-primary btn-queue"
+            data-id="${escAttr(r.id)}"
+            data-title="${escAttr(r.title)}"
+            data-url="${escAttr(r.url)}">
             Queue
           </button>
         </div>
@@ -81,20 +91,30 @@ function esc(s) {
   return d.innerHTML;
 }
 
+function escAttr(s) {
+  if (!s) return '';
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 // --- Queue ---
 
-window.queueTrack = async function(id, title, url) {
+async function queueTrack(id, title, url) {
   try {
-    const job = await api('/queue', {
+    const res = await api('/queue', {
       method: 'POST',
       body: JSON.stringify({ video_id: id, title, url }),
     });
+    if (res.status === 'skipped') {
+      searchResults.innerHTML = '<div class="empty-msg" style="color:#fa3">Skipped — already queued or downloaded!</div>';
+      return;
+    }
+    searchResults.innerHTML = '<div class="empty-msg">Queued! Refreshing...</div>';
     refreshJobs();
     refreshStats();
   } catch (err) {
     alert('Queue failed: ' + err.message);
   }
-};
+}
 
 async function refreshJobs() {
   try {
@@ -112,10 +132,12 @@ async function refreshJobs() {
         <div class="job-info">
           <div class="job-title">${esc(j.title)}</div>
           ${j.error ? `<div class="job-error">${esc(j.error.substring(0, 120))}</div>` : ''}
-          ${j.output_file ? `<div class="job-error" style="color:#44d46b">Done: ${esc(j.output_file.split('/').pop())}</div>` : ''}
+          ${j.output_file ? `<div class="job-error" style="color:#44d46b">Done: ${esc(j.video_id)}</div>` : ''}
         </div>
-        ${j.status === 'completed' && j.output_file ? `
-          <button class="btn btn-play" onclick="playTrack('${esc(j.output_file.split('/').pop())}', '${esc(j.title.replace(/'/g, "\\'"))}')">Play</button>
+        ${j.status === 'completed' && j.video_id ? `
+          <button class="btn btn-play btn-play-track"
+            data-video-id="${escAttr(j.video_id)}"
+            data-title="${escAttr(j.title)}">Play</button>
         ` : ''}
       </div>
     `).join('');
@@ -140,7 +162,7 @@ async function refreshTracks() {
     }
 
     trackList.innerHTML = tracks.map(t => `
-      <div class="track-card">
+      <div class="track-card" id="track-${esc(t.video_id)}">
         <div class="track-info">
           <div class="track-title">${esc(t.title)}</div>
           <div class="track-meta">
@@ -152,8 +174,13 @@ async function refreshTracks() {
           </div>
         </div>
         <div class="actions">
-          <button class="btn btn-play" onclick="playTrack('${esc(t.filename)}', '${esc(t.title.replace(/'/g, "\\'"))}')">Play</button>
-          <a class="btn btn-secondary" href="${API}/audio/${encodeURIComponent(t.filename)}" download>DL</a>
+          <button class="btn btn-play btn-play-track"
+            data-video-id="${escAttr(t.video_id)}"
+            data-title="${escAttr(t.title)}">Play</button>
+          <a class="btn btn-secondary" href="${API}/audio/${encodeURIComponent(t.video_id)}" download>DL</a>
+          <button class="btn btn-danger btn-delete-track"
+            data-video-id="${escAttr(t.video_id)}"
+            data-title="${escAttr(t.title)}">Del</button>
         </div>
       </div>
     `).join('');
@@ -164,16 +191,91 @@ async function refreshTracks() {
 
 sortSelect.addEventListener('change', refreshTracks);
 
+// --- Event delegation ---
+
+document.addEventListener('click', async (e) => {
+  // Queue button (search results)
+  const queueBtn = e.target.closest('.btn-queue');
+  if (queueBtn) {
+    e.preventDefault();
+    queueTrack(queueBtn.dataset.id, queueBtn.dataset.title, queueBtn.dataset.url);
+    return;
+  }
+
+  // Play button (jobs and tracks)
+  const playBtn = e.target.closest('.btn-play-track');
+  if (playBtn) {
+    e.preventDefault();
+    playTrack(playBtn.dataset.videoId, playBtn.dataset.title);
+    return;
+  }
+
+  // Delete button (tracks)
+  const delBtn = e.target.closest('.btn-delete-track');
+  if (delBtn) {
+    e.preventDefault();
+    await deleteTrack(delBtn.dataset.videoId, delBtn.dataset.title);
+    return;
+  }
+});
+
+// --- Batch Queue ---
+
+const batchInput = document.getElementById('batch-input');
+const batchBtn = document.getElementById('batch-btn');
+const batchStatus = document.getElementById('batch-status');
+
+batchBtn.addEventListener('click', async () => {
+  const text = batchInput.value.trim();
+  if (!text) return;
+
+  batchBtn.disabled = true;
+  batchBtn.textContent = 'Enqueuing...';
+  batchStatus.textContent = '';
+
+  try {
+    const result = await api('/queue/batch', {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    });
+    batchStatus.textContent = `${result.queued} queued, ${result.skipped} skipped (already exists).`;
+    if (result.queued > 0) {
+      batchInput.value = '';
+    }
+    refreshJobs();
+    refreshStats();
+  } catch (err) {
+    batchStatus.textContent = 'Batch failed: ' + err.message;
+  } finally {
+    batchBtn.disabled = false;
+    batchBtn.textContent = 'Enqueue All';
+  }
+});
+
+// --- Delete ---
+
+async function deleteTrack(video_id, title) {
+  if (!confirm('Delete \'' + title + '\'?')) return;
+  try {
+    await api('/tracks/' + encodeURIComponent(video_id), { method: 'DELETE' });
+    const card = document.getElementById('track-' + video_id);
+    if (card) card.remove();
+    refreshStats();
+  } catch (err) {
+    alert('Delete failed: ' + err.message);
+  }
+}
+
 // --- Player ---
 
 const player = document.getElementById('player');
 const playerTitle = document.getElementById('player-title');
 
-window.playTrack = function(filename, title) {
-  player.src = `${API}/audio/${encodeURIComponent(filename)}`;
-  playerTitle.textContent = title || filename;
+function playTrack(videoId, title) {
+  player.src = `${API}/audio/${encodeURIComponent(videoId)}`;
+  playerTitle.textContent = title || videoId;
   player.play();
-};
+}
 
 // --- Stats ---
 

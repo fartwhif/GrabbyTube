@@ -40,7 +40,27 @@ def init_db():
         CATALOG_PATH.write_text("[]")
 
 
+def is_video_exists(video_id: str) -> bool:
+    """Check if a video_id is already downloaded (in catalog)."""
+    catalog = load_catalog()
+    return any(t.get("video_id") == video_id for t in catalog)
+
+
+def is_video_queued(video_id: str) -> bool:
+    """Check if a video_id is already in the pending queue."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT 1 FROM jobs WHERE video_id = ? AND status = 'queued' LIMIT 1",
+        (video_id,),
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
 def enqueue_job(query: str, video_id: str, title: str, url: str) -> int:
+    # Skip if already downloaded or already queued
+    if is_video_exists(video_id) or is_video_queued(video_id):
+        return 0
     conn = get_conn()
     cur = conn.execute(
         "INSERT INTO jobs (query, video_id, title, url, status) VALUES (?, ?, ?, ?, 'queued')",

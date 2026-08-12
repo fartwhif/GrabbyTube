@@ -16,6 +16,27 @@ from db import get_job, update_job, get_pending_jobs, add_track
 
 logger = logging.getLogger("grabbytube.processor")
 
+
+def update_index_file():
+    """Rebuild output/index.json from all per-item metadata JSONs (DrivePod-style)."""
+    output_dir = settings.output_path
+    index_path = output_dir / "index.json"
+    items = []
+    for subdir in sorted(output_dir.iterdir()):
+        if not subdir.is_dir():
+            continue
+        meta_file = subdir / f"{subdir.name}.json"
+        if meta_file.exists():
+            try:
+                data = json.loads(meta_file.read_text())
+                items.append(data)
+            except (json.JSONDecodeError, OSError):
+                pass
+    items.sort(key=lambda t: t.get("date_added", ""), reverse=True)
+    index_path.write_text(json.dumps(items, indent=2, ensure_ascii=False))
+    logger.info(f"Index rebuilt: {len(items)} items -> {index_path}")
+
+
 # Safe filename pattern
 _SAFE_RE = re.compile(r'[^\w\-\.\(\) ]')
 
@@ -89,17 +110,37 @@ async def _get_audio_metadata(filepath: Path) -> dict:
 
 
 async def process_job(jid: int):
-    """Process a single job: download -> transcode -> catalog."""
+    """Process a single job: download -> transcode -> catalog.
+
+    Stores each item in its own subdirectory named by video_id (DrivePod-style):
+        output/
+          {video_id}/
+            {video_id}.mp3
+            {video_id}-small.webp
+            {video_id}.json
+    """
     job = get_job(jid)
     if not job:
         return
 
+    video_id = job.get("video_id", "")
+    output_dir = settings.output_path
+    video_dir = output_dir / video_id
+
     update_job(jid, status="downloading")
     logger.info(f"[{jid}] Downloading: {job['title']}")
 
-    output_dir = settings.output_path
-    safe_title = _sanitize(job["title"])
-    outtmpl = str(output_dir / f"{safe_title}.%(ext)s")
+    # Create per-video directory
+    video_dir.mkdir(parents=True, exist_ok=True)
+
+    # Check if already completed
+    mp3_path = video_dir / f"{video_id}.mp3"
+    if mp3_path.exists():
+        logger.info(f"[{jid}] Already exists: {mp3_path}")
+        update_job(jid, status="completed", output_file=str(mp3_path))
+        return
+
+    outtmpl = str(video_dir / "%(id)s.%(ext)s")
 
     ydl_opts = {
         "format": "bestaudio/best",
@@ -112,15 +153,16 @@ async def process_job(jid: int):
     }
 
     downloaded_file = None
+    info = None
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(job["url"], download=True)
-            # yt-dlp gives us the output filename
-            downloaded_file = info.get("filepath")
+            # Use 'filename' for the media file, not 'filepath' (which may be the thumbnail)
+            downloaded_file = info.get("filename") or info.get("_filename")
             if not downloaded_file:
-                # Fallback: find what we just downloaded
-                for f in output_dir.iterdir():
-                    if f.stat().st_mtime > datetime.now(timezone.utc).timestamp() - 60:
+                # Fallback: find the audio file we just downloaded (non-image)
+                for f in video_dir.iterdir():
+                    if f.suffix.lower() not in (".jpg", ".jpeg", ".webp", ".png", ".json"):
                         downloaded_file = str(f)
                         break
 
@@ -130,10 +172,7 @@ async def process_job(jid: int):
         update_job(jid, status="transcoding")
         logger.info(f"[{jid}] Transcoding: {Path(downloaded_file).name}")
 
-        # Transcode to MP3
-        mp3_name = _sanitize_ext(job["title"]).rsplit(".", 1)[0] + ".mp3"
-        mp3_path = output_dir / mp3_name
-
+        # Transcode to MP3 (inside video_dir)
         # Embed metadata from yt-dlp info into the MP3
         ffprobe_meta = {}
         if isinstance(info, dict):
@@ -166,24 +205,47 @@ async def process_job(jid: int):
         if not mp3_path.exists():
             raise RuntimeError("Transcode finished but MP3 not found")
 
+        # Process thumbnail -> resize to small webp
+        thumb_path = None
+        thumb_files = list(video_dir.glob("*.*"))
+        for tf in thumb_files:
+            if tf.suffix.lower() in (".jpg", ".jpeg", ".webp", ".png"):
+                original_thumb = tf
+                break
+        else:
+            original_thumb = None
+
+        if original_thumb:
+            small_thumb = video_dir / f"{video_id}-small.webp"
+            try:
+                await _run([
+                    "ffmpeg", "-y", "-i", str(original_thumb),
+                    "-vf", "scale=400:225:force_original_aspect_ratio=decrease",
+                    "-y", str(small_thumb),
+                ])
+                if small_thumb.exists():
+                    thumb_path = str(small_thumb)
+                    logger.info(f"[{jid}] Thumbnail resized: {small_thumb.name}")
+            except Exception as e:
+                logger.warning(f"[{jid}] Thumbnail resize failed: {e}")
+            # Clean up original thumbnail
+            try:
+                original_thumb.unlink(missing_ok=True)
+            except OSError:
+                pass
+
         # Get final metadata from the MP3
         meta = await _get_audio_metadata(mp3_path)
 
-        # Clean up the downloaded file
+        # Clean up the downloaded raw audio file
         try:
             Path(downloaded_file).unlink(missing_ok=True)
         except OSError:
             pass
-        # Clean up thumbnail if any
-        thumb = str(downloaded_file).rsplit(".", 1)[0] + ".jpg"
-        Path(thumb).unlink(missing_ok=True)
 
-        update_job(jid, status="completed", output_file=str(mp3_path))
-        logger.info(f"[{jid}] Completed: {mp3_path.name}")
-
-        # Add to catalog
+        # Write per-item metadata JSON (like DrivePod)
         track_entry = {
-            "video_id": job.get("video_id", ""),
+            "video_id": video_id,
             "title": meta.get("title") or job.get("title", ""),
             "artist": meta.get("artist") or ffprobe_meta.get("artist", ""),
             "album": meta.get("album", ""),
@@ -197,13 +259,24 @@ async def process_job(jid: int):
             "channels": meta.get("channels", 0),
             "bits_per_sample": meta.get("bits_per_sample", 0),
             "file_encoding": "ID3v2.3",
-            "filename": mp3_path.name,
-            "filepath": str(mp3_path),
+            "audio_path": f"{video_id}/{video_id}.mp3",
+            "thumbnail_path": f"{video_id}/{video_id}-small.webp" if thumb_path else None,
             "source_url": job.get("url", ""),
             "date_added": datetime.now(timezone.utc).isoformat(),
         }
+        json_path = video_dir / f"{video_id}.json"
+        json_path.write_text(json.dumps(track_entry, indent=2, ensure_ascii=False))
+        logger.info(f"[{jid}] Metadata written: {json_path.name}")
+
+        update_job(jid, status="completed", output_file=str(mp3_path))
+        logger.info(f"[{jid}] Completed: {video_dir.name}/")
+
+        # Add to catalog
         add_track(track_entry)
         logger.info(f"[{jid}] Cataloged: {track_entry['title']}")
+
+        # Rebuild the index.json (DrivePod-style)
+        update_index_file()
 
     except Exception as e:
         err_msg = str(e)[:500]
