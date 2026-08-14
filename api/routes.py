@@ -13,6 +13,7 @@ from config import settings
 from db import (
     init_db, enqueue_job, get_job, list_jobs,
     list_tracks, load_catalog, add_track, save_catalog,
+    find_duplicates, batch_delete_tracks, get_cleaned_titles,
 )
 from processor import worker
 
@@ -50,6 +51,10 @@ class BatchQueueRequest(BaseModel):
 class TrackListRequest(BaseModel):
     sort_by: str = "createdAt"
     reverse: bool = True
+
+
+class BatchDeleteRequest(BaseModel):
+    video_ids: list[str]
 
 
 # --- Startup ---
@@ -351,6 +356,28 @@ async def delete_track(video_id: str):
     update_index_file()
 
     return {"deleted": video_id}
+
+
+# --- Duplicates ---
+
+@router.get("/tracks/duplicates")
+async def get_duplicates():
+    """Find potential duplicate tracks using LLM analysis."""
+    groups = await find_duplicates()
+    return {"groups": groups, "total_groups": len(groups)}
+
+
+@router.get("/tracks/cleaned-titles")
+async def get_cleaned_titles_endpoint():
+    """Get numbered list of cleaned titles for manual LLM testing."""
+    return get_cleaned_titles()
+
+
+@router.post("/tracks/batch-delete")
+async def batch_delete(req: BatchDeleteRequest):
+    """Delete multiple tracks at once."""
+    deleted = batch_delete_tracks(req.video_ids)
+    return {"deleted": deleted, "count": len(deleted)}
 
 
 # --- Health ---

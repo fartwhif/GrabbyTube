@@ -1,5 +1,6 @@
 """SQLite job queue and JSON track catalog."""
 import json
+import logging
 import sqlite3
 from pathlib import Path
 
@@ -169,3 +170,190 @@ def list_tracks(sort_by: str = "createdAt", reverse: bool = True) -> list[dict]:
     key_fn = key_map.get(sort_by, key_map["createdAt"])
     catalog.sort(key=key_fn, reverse=reverse)
     return catalog
+
+
+def _clean_title(title: str) -> str:
+    """Strip parenthesized/bracketed suffixes from YouTube titles.
+
+    Removes things like:
+      "Song (Official Video)" -> "Song"
+      "Song [HD UPGRADE]" -> "Song"
+      "Song (Lyrics) [4K]" -> "Song"
+      "Song (Official Video) [HD Remaster]" -> "Song"
+    Keeps meaningful prefixes like "Artist - Song".
+    """
+    import re as _re
+    # Remove trailing bracketed/parenthesized blocks (can be nested)
+    # Handle () and [] including nested ones like ((...))
+    cleaned = _re.sub(r'\s*[([].*?[])]\s*$', '', title)
+    # Remove any remaining trailing parenthesized blocks
+    cleaned = _re.sub(r'\s*\(.*?\)\s*$', '', cleaned)
+    cleaned = _re.sub(r'\s*\[.*?\]\s*$', '', cleaned)
+    # Strip trailing punctuation and whitespace
+    cleaned = cleaned.rstrip(" .-")
+    return cleaned.strip()
+
+
+async def find_duplicates() -> list[dict]:
+    """Find potential duplicate tracks using an LLM to analyze titles.
+
+    Sends a simple prompt with the cleaned title list to the LLM and parses
+    the JSON response back into duplicate groups.
+    """
+    import asyncio
+    import aiohttp
+
+    from config import settings
+    catalog = load_catalog()
+    if len(catalog) < 2:
+        return []
+
+    if not settings.llm_api_key or not settings.llm_base_url:
+        logger = logging.getLogger("grabbytube.db")
+        logger.warning("LLM API key or base URL not configured — skipping duplicate detection")
+        return []
+
+    # Build the list: numbered cleaned titles with artist and duration
+    lines = []
+    for i, t in enumerate(catalog, 1):
+        title = _clean_title(t.get("title", ""))
+        author = t.get("author", "")
+        dur = t.get("duration", 0) or 0
+        dur_min = f"{dur / 60:.1f}m" if dur else "?m"
+        lines.append(f"{i}. \"{title}\" | {author} | {dur_min}")
+
+    items_block = "\n".join(lines)
+    fmt_example = json.dumps({
+        "duplicates": [{
+            "track": "Artist - Title",
+            "occurrences": [{"index": 1, "entry": "1. Title | Artist | 3.0m"}]
+        }]
+    }, indent=2)
+    user_prompt = (
+        "find the duplicates, give JSON output:\n"
+        f"{items_block}\n\n"
+        "Output format:\n"
+        f"{fmt_example}\n\n"
+        "Return ONLY the JSON object. No explanation, no reasoning, no text before or after the JSON."
+    )
+
+    # --- LLM call (mirrors llm_client.py pattern) ---
+    api_key = settings.llm_api_key
+    base_url = settings.llm_base_url.rstrip("/")
+
+    url = base_url + "/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    body = {
+        "model": "qwen3.6-27b",
+        "messages": [
+            {"role": "system", "content": "You are a music library assistant. Output only a JSON object with a 'duplicates' key. No other text."},
+            {"role": "user", "content": user_prompt},
+        ],
+        "max_tokens": 32768,
+        "temperature": 0.0,
+        "thinking": {"type": "enabled", "budget_tokens": 100},
+    }
+
+    logger = logging.getLogger("grabbytube.db")
+    try:
+        async with asyncio.timeout(300):
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=body,
+                                       timeout=aiohttp.ClientTimeout(total=240)) as resp:
+                    data = await resp.json()
+                    msg = data.get("choices", [{}])[0].get("message", {})
+                    content = msg.get("content", "")
+                    if not content:
+                        reasoning = msg.get("reasoning_content", "")
+                        content = reasoning.strip() if reasoning else ""
+    except asyncio.TimeoutError:
+        logger.error("LLM duplicate detection timed out")
+        return []
+    except Exception as e:
+        logger.error(f"LLM duplicate detection failed: {e}")
+        return []
+
+    # Parse JSON from LLM response
+    import re as _re
+    # Find the JSON object in the content
+    content = _re.sub(r'^[^\{]*', '', content)  # strip everything before first {
+    # Try to parse incrementally to find the first complete JSON
+    result = None
+    depth = 0
+    json_start = 0
+    for i, ch in enumerate(content):
+        if ch == '{':
+            if depth == 0:
+                json_start = i
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                candidate = content[json_start:i+1]
+                try:
+                    result = json.loads(candidate)
+                    break
+                except json.JSONDecodeError:
+                    pass  # keep going
+    if result is None:
+        logger.warning(f"LLM returned no parseable JSON: {content[:200]}")
+        return []
+
+    # Parse new format: { "duplicates": [ { "track": "...", "occurrences": [ { "index": N, ... } ] } ] }
+    duplicates = result.get("duplicates", [])
+    result_groups = []
+    seen_ids = set()
+    for dup in duplicates:
+        occurrences = dup.get("occurrences", [])
+        if len(occurrences) < 2:
+            continue
+        tracks = []
+        for occ in occurrences:
+            idx = occ.get("index", 0) - 1  # 1-indexed
+            if 0 <= idx < len(catalog):
+                t = catalog[idx]
+                vid = t.get("videoId")
+                if vid and vid not in seen_ids:
+                    seen_ids.add(vid)
+                    tracks.append(t)
+        if len(tracks) >= 2:
+            result_groups.append({
+                "key": dup.get("track", tracks[0].get("title", "")),
+                "tracks": tracks,
+                "count": len(tracks),
+            })
+
+    result_groups.sort(key=lambda g: -g["count"])
+    return result_groups
+
+
+def get_cleaned_titles() -> list[str]:
+    """Return numbered list of cleaned titles for manual LLM testing."""
+    catalog = load_catalog()
+    return [f"{i}. {_clean_title(t.get('title', ''))} | {t.get('author', '')} | {t.get('duration', 0) / 60:.1f}m"
+            for i, t in enumerate(catalog, 1)]
+
+
+def batch_delete_tracks(video_ids: list[str]) -> list[str]:
+    """Remove multiple tracks from catalog by videoId. Returns list of actually deleted IDs."""
+    import shutil
+    from config import settings
+    from processor import update_index_file
+    catalog = load_catalog()
+    deleted = []
+    for vid in video_ids:
+        new_catalog = [t for t in catalog if t.get("videoId") != vid]
+        if len(new_catalog) < len(catalog):
+            catalog = new_catalog
+            deleted.append(vid)
+            # Delete the video directory on disk
+            video_dir = settings.output_path / vid
+            if video_dir.exists():
+                shutil.rmtree(str(video_dir))
+    if deleted:
+        save_catalog(catalog)
+        update_index_file()
+    return deleted
