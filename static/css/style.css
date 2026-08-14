@@ -216,6 +216,11 @@ h2 {
 }
 
 /* Job cards */
+.queue-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
 .job-card {
   display: flex;
   align-items: center;
@@ -251,6 +256,14 @@ h2 {
   font-size: 0.7rem;
   color: #d44444;
   margin-top: 2px;
+}
+.job-card .job-artist {
+  font-size: 0.75rem;
+  color: #888;
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Track cards */

@@ -73,7 +73,8 @@ searchForm.addEventListener('submit', async (e) => {
             data-id="${escAttr(r.id)}"
             data-title="${escAttr(r.title)}"
             data-url="${escAttr(r.url)}"
-            data-search-query="${escAttr(r._query)}">
+            data-search-query="${escAttr(r._query)}"
+            data-artist="${escAttr(r.uploader)}">
             Queue
           </button>
         </div>
@@ -101,11 +102,11 @@ function escAttr(s) {
 
 // --- Queue ---
 
-async function queueTrack(id, title, url, searchQuery) {
+async function queueTrack(id, title, url, searchQuery, artist) {
   try {
     const res = await api('/queue', {
       method: 'POST',
-      body: JSON.stringify({ video_id: id, title, url, search_query: searchQuery }),
+      body: JSON.stringify({ video_id: id, title, url, search_query: searchQuery, artist }),
     });
     if (res.status === 'skipped') {
       searchResults.innerHTML = '<div class="empty-msg" style="color:#fa3">Skipped — already queued or downloaded!</div>';
@@ -142,7 +143,8 @@ async function retrySearch(jid, query) {
             data-id="${escAttr(r.id)}"
             data-title="${escAttr(r.title)}"
             data-url="${escAttr(r.url)}"
-            data-search-query="${escAttr(r._query)}">
+            data-search-query="${escAttr(r._query)}"
+            data-artist="${escAttr(r.uploader)}">
             Queue
           </button>
         </div>
@@ -155,7 +157,7 @@ async function retrySearch(jid, query) {
 
 async function refreshJobs() {
   try {
-    const jobs = await api('/jobs?limit=20');
+    const jobs = await api('/jobs');
     const jobList = document.getElementById('job-list');
 
     if (!jobs.length) {
@@ -163,11 +165,15 @@ async function refreshJobs() {
       return;
     }
 
-    jobList.innerHTML = jobs.map(j => `
+    jobList.innerHTML = jobs.map(j => {
+      const displayTitle = j.title || j.video_id || '(no title)';
+      const artistLine = j.artist ? `<div class="job-artist">${esc(j.artist)}</div>` : '';
+      return `
       <div class="job-card">
         <span class="status status-${j.status}">${j.status}</span>
         <div class="job-info">
-          <div class="job-title">${esc(j.title)}</div>
+          <div class="job-title">${esc(displayTitle)}</div>
+          ${artistLine}
           ${j.error ? `<div class="job-error">${esc(j.error.substring(0, 120))}</div>` : ''}
           ${j.output_file ? `<div class="job-error" style="color:#44d46b">Done: ${esc(j.video_id)}</div>` : ''}
         </div>
@@ -181,8 +187,13 @@ async function refreshJobs() {
             data-jid="${j.id}"
             data-query="${escAttr(j.query)}">Search Again</button>
         ` : ''}
-      </div>
-    `).join('');
+        ${j.status === 'failed' && j.title ? `
+          <button class="btn btn-secondary btn-retry-title"
+            data-jid="${j.id}"
+            data-query="${escAttr(j.artist ? j.artist + ' ' + j.title : j.title)}">Search by Title</button>
+        ` : ''}
+      </div>`;
+    }).join('');
   } catch (err) {
     console.error('Refresh jobs failed:', err);
   }
@@ -246,19 +257,41 @@ document.addEventListener('click', async (e) => {
     return;
   }
 
+  // Clear completed button
+  const clearCompletedBtn = e.target.closest('#clear-completed-btn');
+  if (clearCompletedBtn) {
+    e.preventDefault();
+    try {
+      const res = await api('/jobs?status=completed', { method: 'DELETE' });
+      refreshJobs();
+      refreshStats();
+    } catch (err) {
+      alert('Clear failed: ' + err.message);
+    }
+    return;
+  }
+
   // Queue button (search results)
   const queueBtn = e.target.closest('.btn-queue');
   if (queueBtn) {
     e.preventDefault();
-    queueTrack(queueBtn.dataset.id, queueBtn.dataset.title, queueBtn.dataset.url, queueBtn.dataset.searchQuery);
+    queueTrack(queueBtn.dataset.id, queueBtn.dataset.title, queueBtn.dataset.url, queueBtn.dataset.searchQuery, queueBtn.dataset.artist);
     return;
   }
 
-  // Search Again button (failed jobs)
+  // Search Again button (failed jobs - uses original query)
   const retryBtn = e.target.closest('.btn-retry-search');
   if (retryBtn) {
     e.preventDefault();
     retrySearch(retryBtn.dataset.jid, retryBtn.dataset.query);
+    return;
+  }
+
+  // Search by Title button (failed jobs - uses artist + title)
+  const retryTitleBtn = e.target.closest('.btn-retry-title');
+  if (retryTitleBtn) {
+    e.preventDefault();
+    retrySearch(retryTitleBtn.dataset.jid, retryTitleBtn.dataset.query);
     return;
   }
 
@@ -343,7 +376,7 @@ async function refreshStats() {
   try {
     const [count, jobs] = await Promise.all([
       api('/tracks/count'),
-      api('/jobs?limit=1'),
+      api('/jobs'),
     ]);
     document.getElementById('track-count').textContent = `${count.count} tracks`;
     const queued = jobs.filter(j => j.status === 'queued' || j.status === 'running');

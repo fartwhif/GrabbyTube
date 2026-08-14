@@ -259,7 +259,7 @@ async def process_job(jid: int):
         json_path.write_text(json.dumps(track_entry, indent=2, ensure_ascii=False))
         logger.info(f"[{jid}] Metadata written: {json_path.name}")
 
-        update_job(jid, status="completed", output_file=str(mp3_path))
+        update_job(jid, status="completed", output_file=str(mp3_path), title=track_entry["title"], artist=track_entry["author"])
         logger.info(f"[{jid}] Completed: {video_dir.name}/")
 
         # Add to catalog

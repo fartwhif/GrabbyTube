@@ -40,6 +40,7 @@ class DownloadRequest(BaseModel):
     title: str
     url: str
     search_query: str | None = None
+    artist: str | None = None
 
 
 class BatchQueueRequest(BaseModel):
@@ -107,6 +108,7 @@ async def queue_download(req: DownloadRequest):
         video_id=req.video_id,
         title=req.title,
         url=req.url,
+        artist=req.artist,
     )
     if jid == 0:
         return {"job_id": 0, "status": "skipped", "message": "Already queued or downloaded"}
@@ -167,7 +169,7 @@ async def batch_queue(req: BatchQueueRequest):
 
 
 @router.get("/jobs")
-async def get_jobs(status: str = None, limit: int = 50):
+async def get_jobs(status: str | None = None, limit: int = 0):
     """List jobs, optionally filtered by status."""
     return list_jobs(status=status, limit=limit)
 
@@ -182,13 +184,16 @@ async def get_job_detail(jid: int):
 
 
 @router.delete("/jobs")
-async def clear_jobs():
-    """Clear all completed and failed jobs from the queue."""
+async def clear_jobs(status: str | None = None):
+    """Clear jobs by status. If status provided, clear only that status. Otherwise clear completed/failed."""
     from db import get_conn
     conn = get_conn()
-    cur = conn.execute(
-        "DELETE FROM jobs WHERE status IN ('completed', 'failed', 'transcoding', 'downloading', 'running')"
-    )
+    if status:
+        cur = conn.execute("DELETE FROM jobs WHERE status = ?", (status,))
+    else:
+        cur = conn.execute(
+            "DELETE FROM jobs WHERE status IN ('completed', 'failed', 'transcoding', 'downloading', 'running')"
+        )
     deleted = cur.rowcount
     conn.commit()
     conn.close()
@@ -196,13 +201,13 @@ async def clear_jobs():
 
 
 @router.post("/jobs/{jid}/retry")
-async def retry_job(jid: int):
-    """Re-search using the original query and return results."""
+async def retry_job(jid: int, query: str | None = None):
+    """Re-search using the original query (or provided query) and return results."""
     job = get_job(jid)
     if not job:
         raise HTTPException(404, "Job not found")
-    query = job.get("query", "")
-    if not query:
+    search_query = query or job.get("query", "")
+    if not search_query:
         raise HTTPException(400, "No search query stored for this job")
     # Re-run the search
     ydl_opts = {
@@ -212,7 +217,7 @@ async def retry_job(jid: int):
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"ytsearch15:{query}", download=False)
+            info = ydl.extract_info(f"ytsearch15:{search_query}", download=False)
     except Exception as e:
         raise HTTPException(400, f"Search failed: {e}")
 

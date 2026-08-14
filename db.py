@@ -24,6 +24,7 @@ def init_db():
             query TEXT NOT NULL,
             video_id TEXT,
             title TEXT,
+            artist TEXT,
             url TEXT,
             status TEXT NOT NULL DEFAULT 'queued',
             output_file TEXT,
@@ -33,6 +34,11 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
     """)
+    # Migration: add artist column if it doesn't exist
+    try:
+        conn.execute("ALTER TABLE jobs ADD COLUMN artist TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     conn.commit()
     conn.close()
     # Ensure catalog file exists
@@ -57,14 +63,14 @@ def is_video_queued(video_id: str) -> bool:
     return row is not None
 
 
-def enqueue_job(query: str, video_id: str, title: str, url: str) -> int:
+def enqueue_job(query: str, video_id: str, title: str, url: str, artist: str | None = None) -> int:
     # Skip if already downloaded or already queued
     if is_video_exists(video_id) or is_video_queued(video_id):
         return 0
     conn = get_conn()
     cur = conn.execute(
-        "INSERT INTO jobs (query, video_id, title, url, status) VALUES (?, ?, ?, ?, 'queued')",
-        (query, video_id, title, url),
+        "INSERT INTO jobs (query, video_id, title, artist, url, status) VALUES (?, ?, ?, ?, ?, 'queued')",
+        (query, video_id, title, artist, url),
     )
     conn.commit()
     jid = cur.lastrowid
@@ -80,7 +86,7 @@ def get_job(jid: int) -> dict:
 
 
 def update_job(jid: int, **kwargs):
-    allowed = {"status", "output_file", "error", "updated_at"}
+    allowed = {"status", "output_file", "error", "updated_at", "title", "artist"}
     fields = {k: v for k, v in kwargs.items() if k in allowed}
     if not fields:
         return
@@ -92,18 +98,29 @@ def update_job(jid: int, **kwargs):
     conn.close()
 
 
-def list_jobs(status: str = None, limit: int = 50) -> list[dict]:
+def list_jobs(status: str | None = None, limit: int = 0) -> list[dict]:
     conn = get_conn()
     if status:
-        rows = conn.execute(
-            "SELECT * FROM jobs WHERE status = ? ORDER BY id DESC LIMIT ?",
-            (status, limit),
-        ).fetchall()
+        if limit > 0:
+            rows = conn.execute(
+                "SELECT * FROM jobs WHERE status = ? ORDER BY id DESC LIMIT ?",
+                (status, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM jobs WHERE status = ? ORDER BY id DESC",
+                (status,),
+            ).fetchall()
     else:
-        rows = conn.execute(
-            "SELECT * FROM jobs ORDER BY id DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        if limit > 0:
+            rows = conn.execute(
+                "SELECT * FROM jobs ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM jobs ORDER BY id DESC"
+            ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
