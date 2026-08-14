@@ -39,6 +39,7 @@ class DownloadRequest(BaseModel):
     video_id: str
     title: str
     url: str
+    search_query: str | None = None
 
 
 class BatchQueueRequest(BaseModel):
@@ -100,8 +101,9 @@ async def search(req: SearchRequest):
 @router.post("/queue")
 async def queue_download(req: DownloadRequest):
     """Add a video to the download queue."""
+    query = req.search_query or req.title
     jid = enqueue_job(
-        query=req.title,
+        query=query,
         video_id=req.video_id,
         title=req.title,
         url=req.url,
@@ -182,6 +184,47 @@ async def clear_jobs():
     conn.commit()
     conn.close()
     return {"cleared": deleted}
+
+
+@router.post("/jobs/{jid}/retry")
+async def retry_job(jid: int):
+    """Re-search using the original query and return results."""
+    job = get_job(jid)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    query = job.get("query", "")
+    if not query:
+        raise HTTPException(400, "No search query stored for this job")
+    # Re-run the search
+    ydl_opts = {
+        "extract_flat": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"ytsearch15:{query}", download=False)
+    except Exception as e:
+        raise HTTPException(400, f"Search failed: {e}")
+
+    entries = info.get("entries", [])
+    results = []
+    for e in entries:
+        vid = e.get("id", "")
+        thumb_url = e.get("thumbnail", "") or ""
+        if not thumb_url:
+            thumbs = e.get("thumbnails", [])
+            if thumbs:
+                thumb_url = thumbs[-1].get("url", "")
+        results.append({
+            "id": vid,
+            "title": e.get("title", ""),
+            "uploader": e.get("uploader", "") or e.get("channel", ""),
+            "duration": e.get("duration", 0),
+            "thumbnail": thumb_url,
+            "url": f"https://www.youtube.com/watch?v={vid}",
+        })
+    return results
 
 
 # --- Tracks catalog ---

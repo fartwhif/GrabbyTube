@@ -59,7 +59,9 @@ searchForm.addEventListener('submit', async (e) => {
       return;
     }
 
-    searchResults.innerHTML = `<div class="search-query">Results for: <strong>${esc(q)}</strong></div>` + results.map(r => `
+    searchResults.innerHTML = `<div class="search-query">Results for: <strong>${esc(q)}</strong></div>` + results.map(r => {
+      r._query = q;
+      return `
       <div class="result-card">
         <img class="thumb" src="${esc(r.thumbnail)}" alt="" loading="lazy">
         <div class="info">
@@ -70,12 +72,13 @@ searchForm.addEventListener('submit', async (e) => {
           <button class="btn btn-primary btn-queue"
             data-id="${escAttr(r.id)}"
             data-title="${escAttr(r.title)}"
-            data-url="${escAttr(r.url)}">
+            data-url="${escAttr(r.url)}"
+            data-search-query="${escAttr(r._query)}">
             Queue
           </button>
         </div>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
   } catch (err) {
     searchResults.innerHTML = `<div class="empty-msg" style="color:#d44">${esc(err.message)}</div>`;
   } finally {
@@ -98,11 +101,11 @@ function escAttr(s) {
 
 // --- Queue ---
 
-async function queueTrack(id, title, url) {
+async function queueTrack(id, title, url, searchQuery) {
   try {
     const res = await api('/queue', {
       method: 'POST',
-      body: JSON.stringify({ video_id: id, title, url }),
+      body: JSON.stringify({ video_id: id, title, url, search_query: searchQuery }),
     });
     if (res.status === 'skipped') {
       searchResults.innerHTML = '<div class="empty-msg" style="color:#fa3">Skipped — already queued or downloaded!</div>';
@@ -113,6 +116,40 @@ async function queueTrack(id, title, url) {
     refreshStats();
   } catch (err) {
     alert('Queue failed: ' + err.message);
+  }
+}
+
+async function retrySearch(jid, query) {
+  searchResults.innerHTML = `<div class="empty-msg"><span class="spinner"></span> Re-searching: "${esc(query)}"...</div>`;
+  searchInput.value = query;
+  try {
+    const results = await api(`/jobs/${jid}/retry`, { method: 'POST' });
+    if (!results.length) {
+      searchResults.innerHTML = `<div class="empty-msg" style="color:#fa3">No results found for: ${esc(query)}</div>`;
+      return;
+    }
+    searchResults.innerHTML = `<div class="search-query">Results for: <strong>${esc(query)}</strong></div>` + results.map(r => {
+      r._query = query;
+      return `
+      <div class="result-card">
+        <img class="thumb" src="${esc(r.thumbnail)}" alt="" loading="lazy">
+        <div class="info">
+          <a class="title yt-link" href="${escAttr(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>
+          <div class="meta">${esc(r.uploader)} &middot; ${fmtDuration(r.duration)}</div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary btn-queue"
+            data-id="${escAttr(r.id)}"
+            data-title="${escAttr(r.title)}"
+            data-url="${escAttr(r.url)}"
+            data-search-query="${escAttr(r._query)}">
+            Queue
+          </button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (err) {
+    searchResults.innerHTML = `<div class="empty-msg" style="color:#d44">${esc(err.message)}</div>`;
   }
 }
 
@@ -138,6 +175,11 @@ async function refreshJobs() {
           <button class="btn btn-play btn-play-track"
             data-video-id="${escAttr(j.video_id)}"
             data-title="${escAttr(j.title)}">Play</button>
+        ` : ''}
+        ${j.status === 'failed' && j.query ? `
+          <button class="btn btn-secondary btn-retry-search"
+            data-jid="${j.id}"
+            data-query="${escAttr(j.query)}">Search Again</button>
         ` : ''}
       </div>
     `).join('');
@@ -208,7 +250,15 @@ document.addEventListener('click', async (e) => {
   const queueBtn = e.target.closest('.btn-queue');
   if (queueBtn) {
     e.preventDefault();
-    queueTrack(queueBtn.dataset.id, queueBtn.dataset.title, queueBtn.dataset.url);
+    queueTrack(queueBtn.dataset.id, queueBtn.dataset.title, queueBtn.dataset.url, queueBtn.dataset.searchQuery);
+    return;
+  }
+
+  // Search Again button (failed jobs)
+  const retryBtn = e.target.closest('.btn-retry-search');
+  if (retryBtn) {
+    e.preventDefault();
+    retrySearch(retryBtn.dataset.jid, retryBtn.dataset.query);
     return;
   }
 
