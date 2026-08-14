@@ -116,44 +116,53 @@ async def queue_download(req: DownloadRequest):
 import re as _re
 
 _YT_ID_RE = _re.compile(r'(?:v=|youtu\.be/|embed/|watch\?.*v=)([A-Za-z0-9_-]{11})')
-_YT_URL_RE = _re.compile(r'(https?://(?:www\.)?(?:youtube\.com|youtu\.be)/[^\s\'">]+)')
+_YT_BARE_ID_RE = _re.compile(r'(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])')
+_YT_URL_RE = _re.compile(r"(https?://(?:www\.)?(?:youtube\.com|youtu\.be)/[^\s<>]+)")
 
 
 @router.post("/queue/batch")
 async def batch_queue(req: BatchQueueRequest):
     """Extract YouTube URLs/IDs from raw text and enqueue them all."""
-    urls_seen = set()
+    ids_seen = set()
     queued = 0
     skipped = 0
     for line in req.text.splitlines():
         line = line.strip()
         if not line:
             continue
-        # First try to find full URLs
+        # First try to find full YouTube URLs on the line
+        urls_found = False
         for url in _YT_URL_RE.findall(line):
-            if url in urls_seen:
-                continue
-            urls_seen.add(url)
+            urls_found = True
             m = _YT_ID_RE.search(url)
             if m:
-                jid = enqueue_job(query=url, video_id=m.group(1), title="", url=url)
+                vid = m.group(1)
+                if vid in ids_seen:
+                    skipped += 1
+                    continue
+                ids_seen.add(vid)
+                jid = enqueue_job(query=url, video_id=vid, title="", url=url)
                 if jid:
                     queued += 1
                 else:
                     skipped += 1
         # If no URL found, try bare video IDs
-        if not _YT_URL_RE.search(line):
+        if not urls_found:
             m = _YT_ID_RE.search(line)
+            if not m:
+                m = _YT_BARE_ID_RE.search(line)
             if m:
                 vid = m.group(1)
                 url = f"https://www.youtube.com/watch?v={vid}"
-                if vid not in urls_seen:
-                    urls_seen.add(vid)
-                    jid = enqueue_job(query=url, video_id=vid, title="", url=url)
-                    if jid:
-                        queued += 1
-                    else:
-                        skipped += 1
+                if vid in ids_seen:
+                    skipped += 1
+                    continue
+                ids_seen.add(vid)
+                jid = enqueue_job(query=url, video_id=vid, title="", url=url)
+                if jid:
+                    queued += 1
+                else:
+                    skipped += 1
     return {"queued": queued, "skipped": skipped}
 
 
