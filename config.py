@@ -12,7 +12,13 @@ class Settings(BaseSettings):
     output_dir: str = DEFAULT_CACHE_DIR
     max_concurrent: int = 2
     preferred_audio_format: str = "mp3"
-    preferred_bitrate: str = "320k"
+    preferred_bitrate: str = "160k"
+    audio_channels: int = 2  # 2 = stereo
+    audio_sample_rate: int = 44100  # 44.1 kHz
+
+    # LLM duplicate detection
+    llm_api_key: str = ""
+    llm_base_url: str = ""
 
     model_config = {
         "env_prefix": "GRABBY_",

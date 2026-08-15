@@ -189,6 +189,8 @@ async def process_job(jid: int):
             "ffmpeg", "-y", "-i", downloaded_file,
             "-codec:a", "libmp3lame",
             "-b:a", settings.preferred_bitrate,
+            "-ar", str(settings.audio_sample_rate),
+            "-ac", str(settings.audio_channels),
             "-id3v2_version", "3",
         ]
         # Add metadata tags
