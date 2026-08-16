@@ -12,9 +12,10 @@ class Settings(BaseSettings):
     output_dir: str = DEFAULT_CACHE_DIR
     max_concurrent: int = 2
     preferred_audio_format: str = "mp3"
-    preferred_bitrate: str = "160k"
-    audio_channels: int = 2  # 2 = stereo
-    audio_sample_rate: int = 44100  # 44.1 kHz
+    audio_bitrate: str = "160k"  # e.g. 128k, 192k, 256k, 320k
+    audio_bitrate_mode: str = "cbr"  # cbr or vbr (vbr uses -q:a 2)
+    audio_sample_rate: int = 44100  # 44.1 kHz (22050, 44100, 48000)
+    audio_channels: int = 2  # 1 = mono, 2 = stereo
 
     # LLM duplicate detection
     llm_api_key: str = ""

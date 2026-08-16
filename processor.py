@@ -188,11 +188,17 @@ async def process_job(jid: int):
         ff_cmd = [
             "ffmpeg", "-y", "-i", downloaded_file,
             "-codec:a", "libmp3lame",
-            "-b:a", settings.preferred_bitrate,
+        ]
+        # Apply bitrate setting (CBR or VBR)
+        if settings.audio_bitrate_mode.lower() == "vbr":
+            ff_cmd.extend(["-q:a", "2"])  # VBR quality 2 (~160-250k avg)
+        else:
+            ff_cmd.extend(["-b:a", settings.audio_bitrate])
+        ff_cmd.extend([
             "-ar", str(settings.audio_sample_rate),
             "-ac", str(settings.audio_channels),
             "-id3v2_version", "3",
-        ]
+        ])
         # Add metadata tags
         for tag_key, tag_val in ffprobe_meta.items():
             if tag_val:
