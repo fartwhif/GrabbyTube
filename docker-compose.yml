@@ -2,18 +2,14 @@ services:
   grabbytube:
     build: .
     container_name: grabbytube
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
     ports:
       - "8101:8101"
     volumes:
       - /home/user/projects/drivepod/cache:/home/user/projects/drivepod/cache
       - ./grabby-tracks.json:/app/grabby-tracks.json
       - ./grabbytube.db:/app/grabbytube.db
-    restart: unless-stopped
-    dns:
-      - 10.255.255.254
-      - 8.8.8.8
-    environment:
-      - GRABBY_HOST=0.0.0.0
-      - GRABBY_PORT=8101
-      - GRABBY_MAX_CONCURRENT=2
-      - GRABBY_PREFERRED_BITRATE=320k
+    env_file:
+      - .env
