@@ -394,7 +394,129 @@ function poll() {
   refreshStats();
 }
 
+// --- Duplicates ---
+
+const duplicatesModal = document.getElementById('duplicates-modal');
+const duplicatesList = document.getElementById('duplicates-list');
+const duplicatesSummary = document.getElementById('duplicates-summary');
+const deleteSelectedBtn = document.getElementById('delete-selected-btn');
+
+document.getElementById('find-duplicates-btn').addEventListener('click', loadDuplicates);
+document.getElementById('close-duplicates-btn').addEventListener('click', () => {
+  duplicatesModal.classList.remove('open');
+});
+duplicatesModal.addEventListener('click', (e) => {
+  if (e.target === duplicatesModal) duplicatesModal.classList.remove('open');
+});
+deleteSelectedBtn.addEventListener('click', deleteSelectedDuplicates);
+
+// Cleaned titles textarea
+const cleanedTitlesText = document.getElementById('cleaned-titles-text');
+document.getElementById('copy-cleaned-btn').addEventListener('click', () => {
+  cleanedTitlesText.select();
+  navigator.clipboard.writeText(cleanedTitlesText.value).then(() => {
+    const btn = document.getElementById('copy-cleaned-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 1500);
+  });
+});
+
+async function loadCleanedTitles() {
+  try {
+    const titles = await api('/tracks/cleaned-titles');
+    cleanedTitlesText.value = titles.join('\n');
+  } catch (err) {
+    console.error('Failed to load cleaned titles:', err);
+  }
+}
+
+async function loadDuplicates() {
+  duplicatesModal.classList.add('open');
+  duplicatesList.innerHTML = '<div class="empty-msg"><span class="spinner"></span> Scanning...</div>';
+  deleteSelectedBtn.disabled = true;
+  duplicatesSummary.textContent = '';
+  try {
+    const res = await api('/tracks/duplicates');
+    renderDuplicates(res.groups);
+  } catch (err) {
+    duplicatesList.innerHTML = `<div class="empty-msg" style="color:#d44">${esc(err.message)}</div>`;
+  }
+}
+
+function renderDuplicates(groups) {
+  if (!groups || !groups.length) {
+    duplicatesList.innerHTML = '<div class="empty-msg">No duplicates found.</div>';
+    deleteSelectedBtn.disabled = true;
+    duplicatesSummary.textContent = '';
+    return;
+  }
+
+  let html = '';
+  groups.forEach((g, gi) => {
+    html += `<div class="dup-group"><div class="dup-group-header"><strong>${esc(g.key)}</strong> <span class="dup-count">${g.count} items</span></div>`;
+    g.tracks.forEach(t => {
+      html += `
+      <label class="dup-item">
+        <input type="checkbox" class="dup-checkbox" data-video-id="${escAttr(t.videoId)}">
+        <span class="dup-item-title">${esc(t.title)}</span>
+        <span class="dup-item-meta">${esc(t.author)} · ${fmtDuration(t.duration)} · ${esc(t.createdAt ? t.createdAt.slice(0, 10) : '')}</span>
+      </label>`;
+    });
+    html += '</div>';
+  });
+
+  duplicatesList.innerHTML = html;
+  updateDeleteButton();
+
+  // Delegate checkbox changes
+  duplicatesList.querySelectorAll('.dup-checkbox').forEach(cb => {
+    cb.addEventListener('change', updateDeleteButton);
+  });
+}
+
+function updateDeleteButton() {
+  const checked = duplicatesList.querySelectorAll('.dup-checkbox:checked');
+  deleteSelectedBtn.disabled = checked.length === 0;
+  duplicatesSummary.textContent = checked.length ? `${checked.length} selected` : '';
+}
+
+async function deleteSelectedDuplicates() {
+  const checked = duplicatesList.querySelectorAll('.dup-checkbox:checked');
+  const ids = Array.from(checked).map(cb => cb.dataset.videoId);
+  if (!ids.length) return;
+  if (!confirm(`Delete ${ids.length} duplicate(s)?`)) return;
+
+  deleteSelectedBtn.disabled = true;
+  deleteSelectedBtn.textContent = 'Deleting...';
+  try {
+    const res = await api('/tracks/batch-delete', {
+      method: 'POST',
+      body: JSON.stringify({ video_ids: ids }),
+    });
+    // Remove deleted items from the modal
+    ids.forEach(vid => {
+      const cb = duplicatesList.querySelector(`[data-video-id="${vid}"]`);
+      if (cb) cb.closest('.dup-item').remove();
+    });
+    // Remove empty groups
+    duplicatesList.querySelectorAll('.dup-group').forEach(group => {
+      if (!group.querySelector('.dup-item')) group.remove();
+    });
+    if (!duplicatesList.querySelector('.dup-group')) {
+      duplicatesList.innerHTML = '<div class="empty-msg">No duplicates found.</div>';
+    }
+    updateDeleteButton();
+    refreshStats();
+    refreshTracks();
+  } catch (err) {
+    alert('Delete failed: ' + err.message);
+  } finally {
+    deleteSelectedBtn.textContent = 'Delete Selected';
+  }
+}
+
 // Initial load
 poll();
+loadCleanedTitles();
 // Refresh every 5 seconds
 setInterval(poll, 5000);

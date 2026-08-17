@@ -57,6 +57,16 @@
         <option value="duration">Duration</option>
       </select>
     </h2>
+    <div class="library-actions">
+      <button class="btn btn-secondary" id="find-duplicates-btn">Find Duplicates</button>
+    </div>
+    <div id="cleaned-titles-section" class="cleaned-titles-box">
+      <div class="cleaned-titles-header">
+        <span>Cleaned Titles (for manual LLM testing)</span>
+        <button class="btn btn-secondary" id="copy-cleaned-btn" style="font-size:0.7rem;padding:3px 10px;">Copy</button>
+      </div>
+      <textarea id="cleaned-titles-text" readonly rows="6"></textarea>
+    </div>
     <div id="track-list" class="results-list"></div>
   </section>
 </div>
@@ -67,6 +77,21 @@
   <audio id="player" controls></audio>
 </div>
 
-<script src="/static/js/app.js?v=7"></script>
+<!-- Duplicates modal -->
+<div id="duplicates-modal" class="modal-overlay">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Potential Duplicates</h3>
+      <button class="btn btn-secondary" id="close-duplicates-btn">&times;</button>
+    </div>
+    <div id="duplicates-list" class="results-list"></div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" id="delete-selected-btn" disabled>Delete Selected</button>
+      <span id="duplicates-summary"></span>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/app.js?v=10"></script>
 </body>
 </html>
