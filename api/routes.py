@@ -2,8 +2,10 @@
 import asyncio
 import json
 import logging
+import re as _re
 from pathlib import Path
 
+import aiohttp
 import yt_dlp
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse, FileResponse
@@ -19,6 +21,173 @@ from processor import worker
 
 logger = logging.getLogger("grabbytube")
 router = APIRouter()
+
+# --- Playlist scraping (adapted from youtube_playlist_ids.py) ---
+
+_YT_PLAYLIST_RE = _re.compile(
+    r'(?:youtube\.com/(?:watch\?.*v=|playlist\?.*list=|embed/)|youtu\.be/)([A-Za-z0-9_-]{11,})'
+)
+_YT_PL_ID_RE = _re.compile(r'^[A-Za-z0-9_-]{11,}$')
+
+BROWSE_API = "https://www.youtube.com/youtubei/v1/browse"
+
+YT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def _find_json(html: str, marker: str) -> dict:
+    idx = html.find(marker)
+    if idx == -1:
+        return {}
+    start = html.find("{", idx)
+    if start == -1:
+        return {}
+    depth = 0
+    for i in range(start, len(html)):
+        if html[i] == "{":
+            depth += 1
+        elif html[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return json.loads(html[start : i + 1])
+    return {}
+
+
+def _extract_playlist_ids(data: dict) -> tuple[list[str], list[str]]:
+    ids = []
+    tokens = []
+
+    def _process_items(items: list):
+        for item in items:
+            vm = item.get("lockupViewModel", {})
+            cid = vm.get("contentId")
+            ctype = vm.get("contentType")
+            if cid and ctype == "LOCKUP_CONTENT_TYPE_VIDEO":
+                ids.append(cid)
+            civm = item.get("continuationItemViewModel", {})
+            cmd = civm.get("continuationCommand", {})
+            inner = cmd.get("innertubeCommand", {})
+            inner_cmd = inner.get("continuationCommand", {})
+            token = cmd.get("token") or inner_cmd.get("token")
+            if token:
+                tokens.append(token)
+
+    for action in data.get("onResponseReceivedActions", []):
+        append = action.get("appendContinuationItemsAction", {})
+        continuation_items = append.get("continuationItems", [])
+        if continuation_items:
+            _process_items(continuation_items)
+
+    def walk(obj):
+        if isinstance(obj, dict):
+            sec = obj.get("itemSectionRenderer")
+            if sec:
+                _process_items(sec.get("contents", []))
+                for ct in sec.get("continuations", []):
+                    token = ct.get("continuationCommand", {}).get("token")
+                    if token:
+                        tokens.append(token)
+            for v in obj.values():
+                walk(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                walk(item)
+
+    walk(data)
+    return ids, tokens
+
+
+async def _fetch_playlist_ids(playlist_id: str) -> list[str]:
+    """Return all video IDs in a playlist via HTML scrape + continuation."""
+    async with aiohttp.ClientSession(headers=YT_HEADERS) as session:
+        # Visit homepage first for cookies
+        try:
+            async with session.get("https://www.youtube.com/", timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                resp.raise_for_status()
+        except Exception:
+            pass  # non-critical; cookies help but aren't required
+
+        url = f"https://www.youtube.com/playlist?list={playlist_id}"
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                resp.raise_for_status()
+                html = await resp.text()
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            logger.error(f"HTTP error fetching playlist {url}: {e}")
+            return []
+
+        initial_data = _find_json(html, "ytInitialData")
+        if not initial_data:
+            logger.error("Could not find ytInitialData on playlist page")
+            return []
+
+        visitor_data = ""
+        vd_match = _re.search(r'"VISITOR_DATA"\s*:\s*"([^"]+)"', html)
+        if vd_match:
+            visitor_data = vd_match.group(1)
+
+        api_key = ""
+        ak_match = _re.search(r'"INNERTUBE_API_KEY"\s*:\s*"([^"]+)"', html)
+        if ak_match:
+            api_key = ak_match.group(1)
+
+        ids, continuations = _extract_playlist_ids(initial_data)
+
+        max_passes = 30
+        passes = 0
+        while continuations and passes < max_passes:
+            passes += 1
+            token = continuations.pop(0)
+            try:
+                payload = {
+                    "continuation": token,
+                    "context": {
+                        "client": {
+                            "clientName": "WEB",
+                            "clientVersion": "2.20240125.08.00",
+                        },
+                        "thirdParty": {},
+                    },
+                }
+                if visitor_data:
+                    payload["context"]["client"]["visitorData"] = visitor_data
+
+                params = {"key": api_key} if api_key else {}
+                async with session.post(
+                    BROWSE_API,
+                    json=payload,
+                    params=params,
+                    timeout=aiohttp.ClientTimeout(total=30),
+                ) as resp:
+                    resp.raise_for_status()
+                    more_data = await resp.json()
+
+                more_ids, more_tokens = _extract_playlist_ids(more_data)
+                ids.extend(more_ids)
+                continuations.extend(more_tokens)
+            except Exception as e:
+                logger.error(f"Continuation error: {e}")
+                break
+
+    return ids
+
+
+def _extract_playlist_id(text: str) -> str | None:
+    """Extract a playlist ID from a URL or bare ID."""
+    text = text.strip()
+    m = _YT_PLAYLIST_RE.search(text)
+    if m:
+        return m.group(1)
+    if _YT_PL_ID_RE.match(text) and len(text) >= 12:
+        return text
+    return None
 
 # Background task handle
 _worker_task: asyncio.Task | None = None
@@ -55,6 +224,10 @@ class TrackListRequest(BaseModel):
 
 class BatchDeleteRequest(BaseModel):
     video_ids: list[str]
+
+
+class PlaylistQueueRequest(BaseModel):
+    url: str
 
 
 # --- Startup ---
@@ -120,8 +293,7 @@ async def queue_download(req: DownloadRequest):
     return {"job_id": jid, "status": "queued"}
 
 
-import re as _re
-
+# Batch regex patterns
 _YT_ID_RE = _re.compile(r'(?:v=|youtu\.be/|embed/|watch\?.*v=)([A-Za-z0-9_-]{11})')
 _YT_BARE_ID_RE = _re.compile(r'(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])')
 _YT_URL_RE = _re.compile(r"(https?://(?:www\.)?(?:youtube\.com|youtu\.be)/[^\s<>]+)")
@@ -171,6 +343,36 @@ async def batch_queue(req: BatchQueueRequest):
                 else:
                     skipped += 1
     return {"queued": queued, "skipped": skipped}
+
+
+@router.post("/queue/playlist")
+async def queue_playlist(req: PlaylistQueueRequest):
+    """Fetch video IDs from a YouTube playlist URL and enqueue them all."""
+    playlist_id = _extract_playlist_id(req.url)
+    if not playlist_id:
+        raise HTTPException(400, "Could not extract playlist ID from URL")
+
+    logger.info(f"Fetching playlist {playlist_id}")
+    video_ids = await _fetch_playlist_ids(playlist_id)
+    if not video_ids:
+        raise HTTPException(400, "No videos found in playlist (or fetch failed)")
+
+    ids_seen = set()
+    queued = 0
+    skipped = 0
+    for vid in video_ids:
+        if vid in ids_seen:
+            skipped += 1
+            continue
+        ids_seen.add(vid)
+        url = f"https://www.youtube.com/watch?v={vid}"
+        jid = enqueue_job(query=f"Playlist: {playlist_id}", video_id=vid, title="", url=url)
+        if jid:
+            queued += 1
+        else:
+            skipped += 1
+
+    return {"queued": queued, "skipped": skipped, "total": len(video_ids)}
 
 
 @router.get("/jobs")

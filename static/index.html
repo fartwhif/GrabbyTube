@@ -27,6 +27,16 @@
     <div id="search-results" class="results-list"></div>
   </section>
 
+  <!-- Playlist Queue -->
+  <section id="playlist-section">
+    <h2>Enqueue Playlist</h2>
+    <form id="playlist-form">
+      <input type="text" id="playlist-input" placeholder="Paste YouTube playlist URL..." autocomplete="off" required>
+      <button type="submit" id="playlist-btn">Queue Playlist</button>
+    </form>
+    <div id="playlist-status"></div>
+  </section>
+
   <!-- Batch Queue -->
   <section id="batch-section">
     <h2>Batch Queue</h2>
@@ -92,6 +102,6 @@
   </div>
 </div>
 
-<script src="/static/js/app.js?v=10"></script>
+<script src="/static/js/app.js?v=11"></script>
 </body>
 </html>

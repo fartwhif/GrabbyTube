@@ -312,6 +312,41 @@ document.addEventListener('click', async (e) => {
   }
 });
 
+// --- Playlist Queue ---
+
+const playlistForm = document.getElementById('playlist-form');
+const playlistInput = document.getElementById('playlist-input');
+const playlistBtn = document.getElementById('playlist-btn');
+const playlistStatus = document.getElementById('playlist-status');
+
+playlistForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const url = playlistInput.value.trim();
+  if (!url) return;
+
+  playlistBtn.disabled = true;
+  playlistBtn.textContent = 'Fetching...';
+  playlistStatus.textContent = '';
+
+  try {
+    const result = await api('/queue/playlist', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    });
+    playlistStatus.textContent = `${result.queued} queued, ${result.skipped} skipped (already exists) out of ${result.total} videos.`;
+    if (result.queued > 0) {
+      playlistInput.value = '';
+    }
+    refreshJobs();
+    refreshStats();
+  } catch (err) {
+    playlistStatus.textContent = 'Playlist failed: ' + err.message;
+  } finally {
+    playlistBtn.disabled = false;
+    playlistBtn.textContent = 'Queue Playlist';
+  }
+});
+
 // --- Batch Queue ---
 
 const batchInput = document.getElementById('batch-input');
