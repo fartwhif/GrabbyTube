@@ -5,6 +5,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs \
     curl \
     unzip \
+    procps \
+    iptables \
     wireguard \
     iproute2 \
     && curl -fsSL https://deno.land/install.sh | sh \
