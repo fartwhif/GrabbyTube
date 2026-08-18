@@ -9,3 +9,6 @@ __pycache__/
 tracks.json
 output/
 .env
+
+# Persistent cookies (contains browser auth)
+data/cookies.txt
