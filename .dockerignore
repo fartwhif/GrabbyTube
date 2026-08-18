@@ -2,6 +2,6 @@
 __pycache__/
 *.db
 *.pyc
-.env
 tracks.json
 output/
+.env
