@@ -32,11 +32,10 @@ def _get_yt_dlp_base_flags() -> list[str]:
     flags = _get_cookies_flag()
     if settings.user_agent.strip():
         flags.extend(["--user-agent", settings.user_agent])
-    # PO Token via bgutil sidecar + EJS solver + web client
+    # PO Token via bgutil sidecar + EJS solver + mweb client
     flags.extend([
         "--remote-components", "ejs:github",
-        "--extractor-args", "youtube:player_client=web",
-        "--extractor-args", "youtube:formats=missing_pot",
+        "--extractor-args", "youtube:player_client=mweb",
         "--extractor-args", "youtubepot-bgutilhttp:base_url=http://grabbytube-bgutil:4416",
     ])
     return flags
@@ -167,11 +166,10 @@ async def process_job(jid: int):
 
     outtmpl = str(video_dir / "%(id)s.%(ext)s")
 
-    # Use yt-dlp CLI subprocess (matches DrivePod pattern)
-    cmd = [
-        "yt-dlp",
-        "--js-runtimes", "node",
-        "--remote-components", "ejs:github",
+    # Build yt-dlp download command
+    cmd = ["yt-dlp"]
+    cmd.extend(_get_yt_dlp_base_flags())
+    cmd.extend([
         "-f", "bestaudio/best",
         "--write-thumbnail",
         "--no-overwrites",
@@ -181,21 +179,18 @@ async def process_job(jid: int):
         "--extractor-retries", "3",
         "-o", outtmpl,
         job["url"],
-    ]
-    cmd[1:1] = _get_yt_dlp_base_flags()
+    ])
 
     downloaded_file = None
     info = None
     try:
         # Extract info first
-        info_cmd = [
-            "yt-dlp",
-            "--js-runtimes", "node",
-            "--remote-components", "ejs:github",
-            "--dump-json",
-            job["url"],
-        ]
-        info_cmd[1:1] = _get_yt_dlp_base_flags()
+        info_cmd = ["yt-dlp"]
+        info_cmd.extend(_get_yt_dlp_base_flags())
+        info_cmd.extend(["--dump-json", job["url"]])
+
+        logger.info(f"[{jid}] CMD: {' '.join(cmd)}")
+        logger.info(f"[{jid}] INFO: {' '.join(info_cmd)}")
         proc = await asyncio.create_subprocess_exec(
             *info_cmd,
             stdout=asyncio.subprocess.PIPE,
