@@ -15,3 +15,11 @@ services:
       - ./grabbytube.db:/app/grabbytube.db
     env_file:
       - .env
+    depends_on:
+      - bgutil-provider
+
+  bgutil-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider
+    container_name: grabbytube-bgutil
+    init: true
+    restart: unless-stopped

@@ -28,10 +28,16 @@ def _get_cookies_flag() -> list[str]:
 
 
 def _get_yt_dlp_base_flags() -> list[str]:
-    """Return common yt-dlp flags (cookies, user agent)."""
+    """Return common yt-dlp flags (cookies, user agent, PO Token)."""
     flags = _get_cookies_flag()
     if settings.user_agent.strip():
         flags.extend(["--user-agent", settings.user_agent])
+    # PO Token via bgutil sidecar + EJS solver + web client
+    flags.extend([
+        "--remote-components", "ejs:github",
+        "--extractor-args", "youtube:player_client=web",
+        "--extractor-args", "youtubepot-bgutilhttp:base_url=http://grabbytube-bgutil:4416",
+    ])
     return flags
 
 
