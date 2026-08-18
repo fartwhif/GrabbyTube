@@ -303,8 +303,8 @@ async def process_job(jid: int):
         track_entry = {
             "videoId": video_id,
             "channelId": info.get("channel_id", "") if isinstance(info, dict) else "",
-            "title": meta.get("title") or job.get("title", ""),
-            "author": meta.get("artist") or ffprobe_meta.get("artist", ""),
+            "title": meta.get("title") or (info.get("title", "") if isinstance(info, dict) else "") or job.get("title", ""),
+            "author": meta.get("artist") or (info.get("uploader", "") if isinstance(info, dict) else "") or ffprobe_meta.get("artist", ""),
             "publishedAt": info.get("upload_date", "") if isinstance(info, dict) else "",
             "thumbnailPath": f"{video_id}/{video_id}-small.webp" if thumb_path else None,
             "audioPath": f"{video_id}/{video_id}.mp3",
