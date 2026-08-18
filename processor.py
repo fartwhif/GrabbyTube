@@ -16,6 +16,24 @@ from db import get_job, update_job, get_pending_jobs, add_track
 
 logger = logging.getLogger("grabbytube.processor")
 
+# Temporary cookies file (Netscape format)
+_COOKIES_FILE = Path("/tmp/grabby_cookies.txt")
+
+
+def _get_cookies_flag() -> list[str]:
+    """Return ['--cookies', path] if cookies are configured, else []."""
+    if settings.youtube_cookies.strip() and _COOKIES_FILE.exists():
+        return ["--cookies", str(_COOKIES_FILE)]
+    return []
+
+
+def _get_yt_dlp_base_flags() -> list[str]:
+    """Return common yt-dlp flags (cookies, user agent)."""
+    flags = _get_cookies_flag()
+    if settings.user_agent.strip():
+        flags.extend(["--user-agent", settings.user_agent])
+    return flags
+
 
 def update_index_file():
     """Rebuild output/grabby-index.json from all per-item metadata JSONs (DrivePod-style)."""
@@ -142,29 +160,55 @@ async def process_job(jid: int):
 
     outtmpl = str(video_dir / "%(id)s.%(ext)s")
 
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": outtmpl,
-        "quiet": True,
-        "no_warnings": True,
-        "extract_flat": False,
-        "writethumbnail": True,
-        "verbose": False,
-    }
+    # Use yt-dlp CLI subprocess (matches DrivePod pattern)
+    cmd = [
+        "yt-dlp",
+        "--js-runtimes", "node",
+        "--remote-components", "ejs:github",
+        "-f", "bestaudio/best",
+        "--write-thumbnail",
+        "--no-overwrites",
+        "--continue",
+        "--retries", "3",
+        "--fragment-retries", "3",
+        "--extractor-retries", "3",
+        "-o", outtmpl,
+        job["url"],
+    ]
+    cmd[1:1] = _get_yt_dlp_base_flags()
 
     downloaded_file = None
     info = None
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(job["url"], download=True)
-            # Use 'filename' for the media file, not 'filepath' (which may be the thumbnail)
-            downloaded_file = info.get("filename") or info.get("_filename")
-            if not downloaded_file:
-                # Fallback: find the audio file we just downloaded (non-image)
-                for f in video_dir.iterdir():
-                    if f.suffix.lower() not in (".jpg", ".jpeg", ".webp", ".png", ".json"):
-                        downloaded_file = str(f)
-                        break
+        # Extract info first
+        info_cmd = [
+            "yt-dlp",
+            "--js-runtimes", "node",
+            "--remote-components", "ejs:github",
+            "--dump-json",
+            job["url"],
+        ]
+        info_cmd[1:1] = _get_yt_dlp_base_flags()
+        proc = await asyncio.create_subprocess_exec(
+            *info_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        info_stdout, _ = await proc.communicate()
+        if proc.returncode == 0:
+            info = json.loads(info_stdout.decode("utf-8", errors="replace"))
+
+        # Download
+        rc, _, stderr = await _run(cmd)
+        if rc != 0:
+            stderr_text = stderr.decode(errors="replace") if stderr else ""
+            raise RuntimeError(f"yt-dlp failed: {stderr_text[:300]}")
+
+        # Find the downloaded file
+        for f in video_dir.iterdir():
+            if f.suffix.lower() not in (".jpg", ".jpeg", ".webp", ".png", ".json"):
+                downloaded_file = str(f)
+                break
 
         if not downloaded_file or not Path(downloaded_file).exists():
             raise RuntimeError("Download completed but output file not found")

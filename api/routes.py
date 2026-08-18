@@ -7,7 +7,7 @@ from pathlib import Path
 
 import aiohttp
 import yt_dlp
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 
@@ -16,6 +16,7 @@ from db import (
     init_db, enqueue_job, get_job, list_jobs,
     list_tracks, load_catalog, add_track, save_catalog,
     find_duplicates, batch_delete_tracks, get_cleaned_titles,
+    get_existing_video_ids,
 )
 from processor import worker
 
@@ -360,11 +361,15 @@ async def queue_playlist(req: PlaylistQueueRequest):
     ids_seen = set()
     queued = 0
     skipped = 0
+    existing_ids = get_existing_video_ids()
     for vid in video_ids:
         if vid in ids_seen:
             skipped += 1
             continue
         ids_seen.add(vid)
+        if vid in existing_ids:
+            skipped += 1
+            continue
         url = f"https://www.youtube.com/watch?v={vid}"
         jid = enqueue_job(query=f"Playlist: {playlist_id}", video_id=vid, title="", url=url)
         if jid:
@@ -401,6 +406,18 @@ async def clear_jobs(status: str | None = None):
         cur = conn.execute(
             "DELETE FROM jobs WHERE status IN ('completed', 'failed', 'transcoding', 'downloading', 'running')"
         )
+    deleted = cur.rowcount
+    conn.commit()
+    conn.close()
+    return {"cleared": deleted}
+
+
+@router.delete("/jobs/all")
+async def clear_all_jobs():
+    """Clear ALL jobs regardless of status."""
+    from db import get_conn
+    conn = get_conn()
+    cur = conn.execute("DELETE FROM jobs")
     deleted = cur.rowcount
     conn.commit()
     conn.close()
@@ -580,6 +597,47 @@ async def batch_delete(req: BatchDeleteRequest):
     """Delete multiple tracks at once."""
     deleted = batch_delete_tracks(req.video_ids)
     return {"deleted": deleted, "count": len(deleted)}
+
+
+# --- Cookies (browser cookies for YouTube auth) ---
+
+from processor import _COOKIES_FILE
+
+@router.post("/cookies")
+async def upload_cookies(file: UploadFile = File(...)):
+    """Upload Netscape-format cookies file (e.g. from EditThisCookie/Get cookies.txt extension)."""
+    content = await file.read()
+    _COOKIES_FILE.write_bytes(content)
+    return {"status": "ok", "message": f"Cookies saved ({len(content)} bytes)", "file": str(_COOKIES_FILE)}
+
+@router.delete("/cookies")
+async def clear_cookies():
+    """Remove stored cookies."""
+    if _COOKIES_FILE.exists():
+        _COOKIES_FILE.unlink()
+    return {"status": "ok", "message": "Cookies cleared"}
+
+@router.get("/cookies/status")
+async def cookies_status():
+    """Check if cookies are configured."""
+    return {"has_cookies": _COOKIES_FILE.exists(), "path": str(_COOKIES_FILE)}
+
+
+# --- Settings ---
+
+class UserAgentRequest(BaseModel):
+    user_agent: str
+
+@router.post("/settings/user-agent")
+async def set_user_agent(req: UserAgentRequest):
+    """Set the user agent for yt-dlp."""
+    settings.user_agent = req.user_agent
+    return {"status": "ok", "user_agent": settings.user_agent}
+
+@router.get("/settings/user-agent")
+async def get_user_agent():
+    """Get the current user agent."""
+    return {"user_agent": settings.user_agent}
 
 
 # --- Health ---

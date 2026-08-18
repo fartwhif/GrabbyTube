@@ -271,6 +271,21 @@ document.addEventListener('click', async (e) => {
     return;
   }
 
+  // Clear all button
+  const clearAllBtn = e.target.closest('#clear-all-btn');
+  if (clearAllBtn) {
+    e.preventDefault();
+    if (!confirm('Clear ALL jobs (including queued/running)?')) return;
+    try {
+      const res = await api('/jobs/all', { method: 'DELETE' });
+      refreshJobs();
+      refreshStats();
+    } catch (err) {
+      alert('Clear failed: ' + err.message);
+    }
+    return;
+  }
+
   // Queue button (search results)
   const queueBtn = e.target.closest('.btn-queue');
   if (queueBtn) {
@@ -420,6 +435,117 @@ async function refreshStats() {
     // silent
   }
 }
+
+// --- Settings ---
+
+const userAgentInput = document.getElementById('user-agent-input');
+const userAgentSaveBtn = document.getElementById('user-agent-save-btn');
+const userAgentStatus = document.getElementById('user-agent-status');
+
+async function loadUserAgent() {
+    try {
+        const res = await fetch(`${API}/settings/user-agent`);
+        if (res.ok) {
+            const data = await res.json();
+            if (userAgentInput) userAgentInput.value = data.user_agent;
+        }
+    } catch (err) {
+        console.error('Failed to load user agent:', err);
+    }
+}
+
+async function loadCookiesStatus() {
+    try {
+        const res = await fetch(`${API}/cookies/status`);
+        if (res.ok) {
+            const data = await res.json();
+            if (cookiesStatus) {
+                cookiesStatus.textContent = data.has_cookies ? 'Cookies loaded.' : 'No cookies.';
+            }
+        }
+    } catch (err) {
+        console.error('Failed to load cookies status:', err);
+    }
+}
+
+if (userAgentSaveBtn) {
+    userAgentSaveBtn.addEventListener('click', async () => {
+        const ua = userAgentInput.value.trim();
+        if (!ua) {
+            userAgentStatus.textContent = 'User agent cannot be empty.';
+            return;
+        }
+        userAgentSaveBtn.disabled = true;
+        userAgentSaveBtn.textContent = 'Saving...';
+        try {
+            const res = await fetch(`${API}/settings/user-agent`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_agent: ua }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            userAgentStatus.textContent = 'Saved.';
+            setTimeout(() => { userAgentStatus.textContent = ''; }, 2000);
+        } catch (err) {
+            userAgentStatus.textContent = 'Save failed: ' + err.message;
+        } finally {
+            userAgentSaveBtn.disabled = false;
+            userAgentSaveBtn.textContent = 'Save';
+        }
+    });
+}
+
+// --- Cookies Upload ---
+
+const cookiesFile = document.getElementById('cookies-file');
+const cookiesUploadBtn = document.getElementById('cookies-upload-btn');
+const cookiesClearBtn = document.getElementById('cookies-clear-btn');
+const cookiesStatus = document.getElementById('cookies-status');
+
+if (cookiesUploadBtn) {
+    cookiesUploadBtn.addEventListener('click', async () => {
+        if (!cookiesFile.files.length) {
+            cookiesStatus.textContent = 'Select a .txt file first.';
+            return;
+        }
+        cookiesUploadBtn.disabled = true;
+        cookiesUploadBtn.textContent = 'Uploading...';
+        try {
+            const formData = new FormData();
+            formData.append('file', cookiesFile.files[0]);
+            const res = await fetch(`${API}/cookies`, {
+                method: 'POST',
+                body: formData,
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            cookiesStatus.textContent = data.message || 'Cookies uploaded.';
+            cookiesFile.value = '';
+        } catch (err) {
+            cookiesStatus.textContent = 'Upload failed: ' + err.message;
+        } finally {
+            cookiesUploadBtn.disabled = false;
+            cookiesUploadBtn.textContent = 'Upload';
+        }
+    });
+}
+
+if (cookiesClearBtn) {
+    cookiesClearBtn.addEventListener('click', async () => {
+        try {
+            const res = await fetch(`${API}/cookies`, { method: 'DELETE' });
+            if (!res.ok) throw new Error(await res.text());
+            cookiesStatus.textContent = 'Cookies cleared.';
+        } catch (err) {
+            cookiesStatus.textContent = 'Clear failed: ' + err.message;
+        }
+    });
+}
+
+// Load settings on startup
+loadUserAgent();
+loadCookiesStatus();
 
 // --- Poll ---
 

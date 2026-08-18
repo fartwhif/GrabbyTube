@@ -53,6 +53,12 @@ def is_video_exists(video_id: str) -> bool:
     return any(t.get("videoId") == video_id for t in catalog)
 
 
+def get_existing_video_ids() -> set[str]:
+    """Return a set of all video IDs already in the catalog (single load)."""
+    catalog = load_catalog()
+    return {t["videoId"] for t in catalog if t.get("videoId")}
+
+
 def is_video_queued(video_id: str) -> bool:
     """Check if a video_id is already in the pending queue."""
     conn = get_conn()

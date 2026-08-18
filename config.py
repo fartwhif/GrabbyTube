@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_base_url: str = ""
 
+    # YouTube cookies (Netscape format)
+    youtube_cookies: str = ""
+
+    # User agent for yt-dlp
+    user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+
     model_config = {
         "env_prefix": "GRABBY_",
         "env_file": str(PROJECT_ROOT / ".env"),

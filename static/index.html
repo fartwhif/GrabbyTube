@@ -17,6 +17,25 @@
     </div>
   </header>
 
+  <!-- Settings -->
+  <section id="settings-section">
+    <h2>Settings</h2>
+    <div class="settings-row">
+      <label for="user-agent-input">User Agent:</label>
+      <input type="text" id="user-agent-input" placeholder="Browser user agent string...">
+      <button type="button" id="user-agent-save-btn">Save</button>
+      <span id="user-agent-status"></span>
+    </div>
+    <div class="settings-row">
+      <label for="cookies-file">YouTube Cookies (.txt):</label>
+      <input type="file" id="cookies-file" accept=".txt">
+      <button type="button" id="cookies-upload-btn">Upload</button>
+      <button type="button" id="cookies-clear-btn" class="btn btn-danger">Clear</button>
+      <span id="cookies-status"></span>
+    </div>
+    <p style="font-size:0.8rem;color:#888;">Cookies bypass YouTube 403 blocks on datacenter IPs. Export from "Get cookies.txt" browser extension.</p>
+  </section>
+
   <!-- Search -->
   <section id="search-section">
     <h2>Search</h2>
@@ -51,6 +70,7 @@
     <div class="queue-actions">
       <button class="btn btn-secondary btn-clear-jobs" id="clear-jobs-btn">Clear Done/Failed</button>
       <button class="btn btn-secondary btn-clear-completed" id="clear-completed-btn">Clear Successful</button>
+      <button class="btn btn-danger btn-clear-all" id="clear-all-btn">Clear All</button>
     </div>
     <div id="job-list" class="results-list"></div>
   </section>
@@ -102,6 +122,6 @@
   </div>
 </div>
 
-<script src="/static/js/app.js?v=11"></script>
+<script src="/static/js/app.js?v=13"></script>
 </body>
 </html>
