@@ -37,6 +37,8 @@ def _get_yt_dlp_base_flags() -> list[str]:
         "--remote-components", "ejs:github",
         "--extractor-args", "youtube:player_client=mweb",
         "--extractor-args", "youtubepot-bgutilhttp:base_url=http://grabbytube-bgutil:4416",
+        "--min-sleep-interval", "5",
+        "--max-sleep-interval", "15",
     ])
     return flags
 
