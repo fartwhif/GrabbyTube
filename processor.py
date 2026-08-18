@@ -35,7 +35,7 @@ def _get_yt_dlp_base_flags() -> list[str]:
     # PO Token via bgutil sidecar + EJS solver + web client
     flags.extend([
         "--remote-components", "ejs:github",
-        "--extractor-args", "youtube:player_client=web",
+        "--extractor-args", "youtube:player_client=mweb,tv,web_safari",
         "--extractor-args", "youtubepot-bgutilhttp:base_url=http://grabbytube-bgutil:4416",
     ])
     return flags
