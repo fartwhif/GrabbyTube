@@ -623,6 +623,53 @@ async def cookies_status():
     return {"has_cookies": _COOKIES_FILE.exists(), "path": str(_COOKIES_FILE)}
 
 
+# --- Tester ---
+
+import shlex
+from processor import _COOKIES_FILE
+
+class TestCommandRequest(BaseModel):
+    command: str
+
+@router.post("/test/run")
+async def run_test_command(req: TestCommandRequest):
+    """Run a test command with {COOKIESFILE} replaced by the actual cookies path."""
+    cmd = req.command.strip()
+    if not cmd:
+        raise HTTPException(400, "Command is empty")
+
+    # Replace {COOKIESFILE} token
+    if _COOKIES_FILE.exists():
+        cmd = cmd.replace("{COOKIESFILE}", str(_COOKIES_FILE))
+    else:
+        cmd = cmd.replace("{COOKIESFILE}", "")
+
+    try:
+        args = shlex.split(cmd)
+    except ValueError as e:
+        raise HTTPException(400, f"Invalid command syntax: {e}")
+
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate(timeout=60)
+
+    stdout_text = stdout.decode("utf-8", errors="replace")
+    stderr_text = stderr.decode("utf-8", errors="replace")
+    output = stdout_text + stderr_text
+
+    logger.info(f"[TEST] Command: {cmd}")
+    logger.info(f"[TEST] Output:\n{output}")
+
+    return {
+        "exit_code": proc.returncode,
+        "output": output,
+        "command": cmd,
+    }
+
+
 # --- Settings ---
 
 class UserAgentRequest(BaseModel):

@@ -16,13 +16,13 @@ from db import get_job, update_job, get_pending_jobs, add_track
 
 logger = logging.getLogger("grabbytube.processor")
 
-# Temporary cookies file (Netscape format)
-_COOKIES_FILE = Path("/tmp/grabby_cookies.txt")
+# Temporary cookies file (Netscape format) — persisted in ./data/
+_COOKIES_FILE = Path("/app/data/cookies.txt")
 
 
 def _get_cookies_flag() -> list[str]:
-    """Return ['--cookies', path] if cookies are configured, else []."""
-    if settings.youtube_cookies.strip() and _COOKIES_FILE.exists():
+    """Return ['--cookies', path] if cookies file exists."""
+    if _COOKIES_FILE.exists():
         return ["--cookies", str(_COOKIES_FILE)]
     return []
 

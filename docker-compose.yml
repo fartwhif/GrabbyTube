@@ -18,6 +18,8 @@ services:
       - ./grabbytube.db:/app/grabbytube.db
       - /lib/modules:/lib/modules:ro
       - ./static:/app/static
+      - .:/app
+      - ./data:/app/data
     env_file:
       - .env
     depends_on:

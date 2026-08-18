@@ -547,6 +547,40 @@ if (cookiesClearBtn) {
 loadUserAgent();
 loadCookiesStatus();
 
+// --- Tester ---
+
+const testCommand = document.getElementById('test-command');
+const testRunBtn = document.getElementById('test-run-btn');
+const testOutput = document.getElementById('test-output');
+
+if (testRunBtn) {
+    testRunBtn.addEventListener('click', async () => {
+        const cmd = testCommand.value.trim();
+        if (!cmd) {
+            testOutput.value = 'Enter a command first.';
+            return;
+        }
+        testRunBtn.disabled = true;
+        testRunBtn.textContent = 'Running...';
+        testOutput.value = 'Running...';
+        try {
+            const res = await fetch(`${API}/test/run`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: cmd }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            testOutput.value = `[Command: ${data.command}]\n[Exit: ${data.exit_code}]\n${data.output}`;
+        } catch (err) {
+            testOutput.value = 'Error: ' + err.message;
+        } finally {
+            testRunBtn.disabled = false;
+            testRunBtn.textContent = 'Run';
+        }
+    });
+}
+
 // --- Poll ---
 
 function poll() {
