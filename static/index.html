@@ -17,25 +17,6 @@
     </div>
   </header>
 
-  <!-- Settings -->
-  <section id="settings-section">
-    <h2>Settings</h2>
-    <div class="settings-row">
-      <label for="user-agent-input">User Agent:</label>
-      <input type="text" id="user-agent-input" placeholder="Browser user agent string...">
-      <button type="button" id="user-agent-save-btn">Save</button>
-      <span id="user-agent-status"></span>
-    </div>
-    <div class="settings-row">
-      <label for="cookies-file">YouTube Cookies (.txt):</label>
-      <input type="file" id="cookies-file" accept=".txt">
-      <button type="button" id="cookies-upload-btn">Upload</button>
-      <button type="button" id="cookies-clear-btn" class="btn btn-danger">Clear</button>
-      <span id="cookies-status"></span>
-    </div>
-    <p style="font-size:0.8rem;color:#888;">Cookies bypass YouTube 403 blocks on datacenter IPs. Export from "Get cookies.txt" browser extension.</p>
-  </section>
-
   <!-- Search -->
   <section id="search-section">
     <h2>Search</h2>
@@ -99,6 +80,34 @@
     </div>
     <div id="track-list" class="results-list"></div>
   </section>
+
+  <!-- Settings -->
+  <section id="settings-section">
+    <h2>Settings</h2>
+    <div class="settings-row">
+      <label for="user-agent-input">User Agent:</label>
+      <input type="text" id="user-agent-input" placeholder="Browser user agent string...">
+      <button type="button" id="user-agent-save-btn">Save</button>
+      <span id="user-agent-status"></span>
+    </div>
+    <div class="settings-row">
+      <label for="cookies-file">YouTube Cookies (.txt):</label>
+      <input type="file" id="cookies-file" accept=".txt">
+      <button type="button" id="cookies-upload-btn">Upload</button>
+      <button type="button" id="cookies-clear-btn" class="btn btn-danger">Clear</button>
+      <span id="cookies-status"></span>
+    </div>
+    <p style="font-size:0.8rem;color:#888;">Cookies bypass YouTube 403 blocks on datacenter IPs. Export from "Get cookies.txt" browser extension.</p>
+  </section>
+
+  <!-- Tester -->
+  <section id="tester-section">
+    <h2>yt-dlp Tester</h2>
+    <p style="font-size:0.8rem;color:#888;">Run a test command. Use <code>{COOKIESFILE}</code> to inject uploaded cookies.</p>
+    <textarea id="test-command" style="width:650px;height:75px" placeholder="yt-dlp --cookies {COOKIESFILE} -F https://www.youtube.com/watch?v=..."></textarea>
+    <button type="button" id="test-run-btn">Run</button>
+    <textarea id="test-output" readonly style="width:650px;height:75px" placeholder="Output will appear here..."></textarea>
+  </section>
 </div>
 
 <!-- Audio player -->
@@ -122,6 +131,6 @@
   </div>
 </div>
 
-<script src="/static/js/app.js?v=13"></script>
+<script src="/static/js/app.js?v=15"></script>
 </body>
 </html>

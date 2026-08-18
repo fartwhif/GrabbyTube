@@ -17,6 +17,7 @@ services:
       - ./grabby-tracks.json:/app/grabby-tracks.json
       - ./grabbytube.db:/app/grabbytube.db
       - /lib/modules:/lib/modules:ro
+      - ./static:/app/static
     env_file:
       - .env
     depends_on:
