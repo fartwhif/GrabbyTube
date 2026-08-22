@@ -12,3 +12,4 @@ output/
 
 # Persistent cookies (contains browser auth)
 data/cookies.txt
+/grabby-tracks.json
