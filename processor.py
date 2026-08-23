@@ -16,14 +16,30 @@ from db import get_job, update_job, get_pending_jobs, add_track
 
 logger = logging.getLogger("grabbytube.processor")
 
-# Temporary cookies file (Netscape format) — persisted in ./data/
-_COOKIES_FILE = Path("/app/data/cookies.txt")
+# Shared cookie export from the ytcookies container (read-only mount,
+# continuously refreshed by its CDP cookie exporter). Preferred when present;
+# falls back to the manually uploaded file in ./data/.
+_SHARED_COOKIES_FILE = Path("/shared-cookies/cookies.txt")
+_LOCAL_COOKIES_FILE = Path("/app/data/cookies.txt")
+
+
+def effective_cookies_file() -> Path | None:
+    """Return the cookies file yt-dlp should use: shared export first."""
+    for candidate in (_SHARED_COOKIES_FILE, _LOCAL_COOKIES_FILE):
+        if candidate.exists() and candidate.stat().st_size > 0:
+            return candidate
+    return None
+
+
+# Kept for backwards compatibility with code importing the old constant.
+_COOKIES_FILE = _LOCAL_COOKIES_FILE
 
 
 def _get_cookies_flag() -> list[str]:
-    """Return ['--cookies', path] if cookies file exists."""
-    if _COOKIES_FILE.exists():
-        return ["--cookies", str(_COOKIES_FILE)]
+    """Return ['--cookies', path] if a cookies file is available."""
+    path = effective_cookies_file()
+    if path:
+        return ["--cookies", str(path)]
     return []
 
 

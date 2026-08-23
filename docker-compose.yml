@@ -14,12 +14,13 @@ services:
       - "8101:8101"
     volumes:
       - /home/user/projects/drivepod/cache:/home/user/projects/drivepod/cache
-      - ./grabby-tracks.json:/app/grabby-tracks.json
-      - ./grabbytube.db:/app/grabbytube.db
+      - /home/user/projects/grabbytube/grabby-tracks.json:/app/grabby-tracks.json
+      - /home/user/projects/grabbytube/grabbytube.db:/app/grabbytube.db
       - /lib/modules:/lib/modules:ro
       - ./static:/app/static
       - .:/app
       - ./data:/app/data
+      - /home/user/projects/ytcookies/data:/shared-cookies
     env_file:
       - .env
     depends_on:

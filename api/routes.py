@@ -601,18 +601,20 @@ async def batch_delete(req: BatchDeleteRequest):
 
 # --- Cookies (browser cookies for YouTube auth) ---
 
-from processor import _COOKIES_FILE
+from processor import _COOKIES_FILE, effective_cookies_file
 
 @router.post("/cookies")
 async def upload_cookies(file: UploadFile = File(...)):
-    """Upload Netscape-format cookies file (e.g. from EditThisCookie/Get cookies.txt extension)."""
+    """Upload Netscape-format cookies file (e.g. from EditThisCookie/Get cookies.txt extension).
+
+    Note: the shared ytcookies export (/shared-cookies) takes precedence when present."""
     content = await file.read()
     _COOKIES_FILE.write_bytes(content)
     return {"status": "ok", "message": f"Cookies saved ({len(content)} bytes)", "file": str(_COOKIES_FILE)}
 
 @router.delete("/cookies")
 async def clear_cookies():
-    """Remove stored cookies."""
+    """Remove stored cookies (shared ytcookies export, if mounted, still takes precedence)."""
     if _COOKIES_FILE.exists():
         _COOKIES_FILE.unlink()
     return {"status": "ok", "message": "Cookies cleared"}
@@ -620,7 +622,12 @@ async def clear_cookies():
 @router.get("/cookies/status")
 async def cookies_status():
     """Check if cookies are configured."""
-    return {"has_cookies": _COOKIES_FILE.exists(), "path": str(_COOKIES_FILE)}
+    effective = effective_cookies_file()
+    return {
+        "has_cookies": effective is not None,
+        "path": str(effective) if effective else None,
+        "source": "shared-ytcookies" if effective and str(effective).startswith("/shared-cookies") else "local",
+    }
 
 
 # --- Tester ---
@@ -639,8 +646,9 @@ async def run_test_command(req: TestCommandRequest):
         raise HTTPException(400, "Command is empty")
 
     # Replace {COOKIESFILE} token
-    if _COOKIES_FILE.exists():
-        cmd = cmd.replace("{COOKIESFILE}", str(_COOKIES_FILE))
+    effective = effective_cookies_file()
+    if effective:
+        cmd = cmd.replace("{COOKIESFILE}", str(effective))
     else:
         cmd = cmd.replace("{COOKIESFILE}", "")
 
