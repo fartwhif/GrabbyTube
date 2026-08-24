@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # User agent for yt-dlp
     user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
 
+    # Shared secret for destructive endpoints (DrivePod interop). Empty = auth disabled.
+    api_token: str = ""
+
     model_config = {
         "env_prefix": "GRABBY_",
         "env_file": str(PROJECT_ROOT / ".env"),

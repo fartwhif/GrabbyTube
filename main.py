@@ -1,9 +1,10 @@
 """GrabbyTube - YouTube to MP3 web app."""
 import logging
 from contextlib import asynccontextmanager
+from hmac import compare_digest
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import settings
@@ -28,6 +29,27 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="GrabbyTube", lifespan=lifespan)
+
+# Destructive endpoints require a shared secret (X-Grabby-Token header) when
+# GRABBY_API_TOKEN is set. Protects the public API (grabbytube.example.com) from
+# arbitrary track deletion; DrivePod sends the same token from its .env.
+PROTECTED_DELETE_PATHS = (
+    "/tracks/",          # DELETE /tracks/{video_id}, POST /tracks/batch-delete
+    "/jobs",             # DELETE /jobs, /jobs/all
+)
+
+
+@app.middleware("http")
+async def verify_delete_token(request: Request, call_next):
+    path = request.url.path
+    is_destructive = (
+        request.method == "DELETE" and path.startswith(PROTECTED_DELETE_PATHS)
+    ) or (request.method == "POST" and path == "/tracks/batch-delete")
+    if is_destructive and settings.api_token and not compare_digest(request.headers.get("x-grabby-token", ""), settings.api_token):
+        return JSONResponse(status_code=401, content={"detail": "Invalid or missing token"})
+    return await call_next(request)
+
+
 app.include_router(router)
 app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 

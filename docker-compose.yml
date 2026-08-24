@@ -25,9 +25,15 @@ services:
       - .env
     depends_on:
       - bgutil-provider
+    networks:
+      - shared
 
   bgutil-provider:
     image: brainicism/bgutil-ytdlp-pot-provider
     container_name: grabbytube-bgutil
     init: true
     restart: unless-stopped
+
+networks:
+  shared:
+    external: true
