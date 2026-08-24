@@ -188,7 +188,7 @@ async def process_job(jid: int):
     cmd = ["yt-dlp"]
     cmd.extend(_get_yt_dlp_base_flags())
     cmd.extend([
-        "-f", "bestaudio/best",
+        "-f", "b[acodec!=none][height<=360]/b[acodec!=none]/ba/b",
         "--write-thumbnail",
         "--no-overwrites",
         "--continue",
