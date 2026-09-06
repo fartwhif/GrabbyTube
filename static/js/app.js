@@ -1,4 +1,5 @@
 const API = '';
+let grabbyToken = localStorage.getItem('grabbyToken') || '';
 
 // --- Helpers ---
 
@@ -22,8 +23,10 @@ function fmtUploadDate(d) {
 }
 
 function api(path, opts = {}) {
+  const headers = { 'Content-Type': 'application/json', ...opts.headers };
+  if (grabbyToken) headers['X-Grabby-Token'] = grabbyToken;
   return fetch(`${API}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...opts.headers },
+    headers,
     ...opts,
   }).then(r => {
     if (!r.ok) return r.text().then(t => { throw new Error(t); });
@@ -528,6 +531,26 @@ if (cookiesUploadBtn) {
             cookiesUploadBtn.disabled = false;
             cookiesUploadBtn.textContent = 'Upload';
         }
+    });
+}
+
+// --- API Token ---
+
+const apiTokenInput = document.getElementById('api-token-input');
+const apiTokenSaveBtn = document.getElementById('api-token-save-btn');
+const apiTokenStatus = document.getElementById('api-token-status');
+
+if (apiTokenInput) apiTokenInput.value = grabbyToken;
+if (apiTokenSaveBtn) {
+    apiTokenSaveBtn.addEventListener('click', () => {
+        grabbyToken = apiTokenInput.value.trim();
+        if (grabbyToken) {
+            localStorage.setItem('grabbyToken', grabbyToken);
+        } else {
+            localStorage.removeItem('grabbyToken');
+        }
+        apiTokenStatus.textContent = grabbyToken ? 'Saved.' : 'Cleared.';
+        setTimeout(() => { apiTokenStatus.textContent = ''; }, 2000);
     });
 }
 

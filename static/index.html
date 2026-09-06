@@ -91,6 +91,13 @@
       <span id="user-agent-status"></span>
     </div>
     <div class="settings-row">
+      <label for="api-token-input">API Token:</label>
+      <input type="password" id="api-token-input" placeholder="GRABBY_API_TOKEN (required for delete/clear actions)" autocomplete="off">
+      <button type="button" id="api-token-save-btn">Save</button>
+      <span id="api-token-status"></span>
+    </div>
+    <p style="font-size:0.8rem;color:#888;">Stored only in this browser (localStorage). Must match GRABBY_API_TOKEN in the server .env for clear/delete to work.</p>
+    <div class="settings-row">
       <label for="cookies-file">YouTube Cookies (.txt):</label>
       <input type="file" id="cookies-file" accept=".txt">
       <button type="button" id="cookies-upload-btn">Upload</button>
@@ -131,6 +138,6 @@
   </div>
 </div>
 
-<script src="/static/js/app.js?v=15"></script>
+<script src="/static/js/app.js?v=16"></script>
 </body>
 </html>
