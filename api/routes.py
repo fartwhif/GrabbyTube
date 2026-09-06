@@ -25,6 +25,10 @@ router = APIRouter()
 
 # --- Playlist scraping (adapted from youtube_playlist_ids.py) ---
 
+# Prefer an explicit list= param over v=/embed/youtu.be: a watch URL like
+# https://www.youtube.com/watch?v=X&list=RD... carries the playlist in list=,
+# and grabbing the v= ID instead 404s when treated as a playlist.
+_YT_LIST_PARAM_RE = _re.compile(r'[?&]list=([A-Za-z0-9_-]{11,})')
 _YT_PLAYLIST_RE = _re.compile(
     r'(?:youtube\.com/(?:watch\?.*v=|playlist\?.*list=|embed/)|youtu\.be/)([A-Za-z0-9_-]{11,})'
 )
@@ -105,8 +109,43 @@ def _extract_playlist_ids(data: dict) -> tuple[list[str], list[str]]:
     return ids, tokens
 
 
-async def _fetch_playlist_ids(playlist_id: str) -> list[str]:
-    """Return all video IDs in a playlist via HTML scrape + continuation."""
+def _alert_text(s) -> str:
+    if isinstance(s, dict):
+        if "simpleText" in s:
+            return s["simpleText"]
+        if "runs" in s:
+            return "".join(r.get("text", "") for r in s["runs"])
+        return " ".join(_alert_text(v) for v in s.values())
+    if isinstance(s, str):
+        return s
+    if isinstance(s, list):
+        return " ".join(_alert_text(v) for v in s)
+    return ""
+
+
+def _extract_alerts(data: dict) -> str:
+    """Collect alertRenderer texts from a ytInitialData / browse response."""
+    texts = []
+
+    def walk(o):
+        if isinstance(o, dict):
+            ar = o.get("alertRenderer")
+            if ar:
+                t = _alert_text(ar.get("text", "")).strip()
+                if t:
+                    texts.append(t)
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+
+    walk(data)
+    return " ".join(dict.fromkeys(texts)).strip()
+
+
+async def _fetch_playlist_ids(playlist_id: str) -> tuple[list[str], str]:
+    """Return (video_ids, error). error is '' on success, else a user-facing message."""
     async with aiohttp.ClientSession(headers=YT_HEADERS) as session:
         # Visit homepage first for cookies
         try:
@@ -122,12 +161,12 @@ async def _fetch_playlist_ids(playlist_id: str) -> list[str]:
                 html = await resp.text()
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             logger.error(f"HTTP error fetching playlist {url}: {e}")
-            return []
+            return [], f"Could not reach YouTube: {type(e).__name__}: {e}"
 
         initial_data = _find_json(html, "ytInitialData")
         if not initial_data:
             logger.error("Could not find ytInitialData on playlist page")
-            return []
+            return [], "YouTube returned a page with no playlist data (blocked or malformed response)"
 
         visitor_data = ""
         vd_match = _re.search(r'"VISITOR_DATA"\s*:\s*"([^"]+)"', html)
@@ -177,12 +216,32 @@ async def _fetch_playlist_ids(playlist_id: str) -> list[str]:
                 logger.error(f"Continuation error: {e}")
                 break
 
-    return ids
+    if not ids:
+        alert = _extract_alerts(initial_data)
+        if alert:
+            # Translate the common YouTube alert into an actionable message.
+            if "unviewable" in alert.lower():
+                msg = (
+                    f"YouTube: '{alert}' — this is a saved/library playlist (RD prefix). "
+                    "It can only be read while signed in as the owning account in the "
+                    "ytcookies browser session; re-login there and retry, or share the "
+                    "playlist and use its PL/OL URL instead."
+                )
+            else:
+                msg = f"YouTube: {alert}"
+            logger.warning(f"Playlist {playlist_id} blocked: {alert}")
+            return [], msg
+        logger.warning(f"Playlist {playlist_id} returned no video IDs (0 continuations followed)")
+        return [], "Playlist loaded but contained no videos (empty, or YouTube blocked the scrape)"
+    return ids, ""
 
 
 def _extract_playlist_id(text: str) -> str | None:
     """Extract a playlist ID from a URL or bare ID."""
     text = text.strip()
+    m = _YT_LIST_PARAM_RE.search(text)
+    if m:
+        return m.group(1)
     m = _YT_PLAYLIST_RE.search(text)
     if m:
         return m.group(1)
@@ -354,9 +413,9 @@ async def queue_playlist(req: PlaylistQueueRequest):
         raise HTTPException(400, "Could not extract playlist ID from URL")
 
     logger.info(f"Fetching playlist {playlist_id}")
-    video_ids = await _fetch_playlist_ids(playlist_id)
+    video_ids, fetch_error = await _fetch_playlist_ids(playlist_id)
     if not video_ids:
-        raise HTTPException(400, "No videos found in playlist (or fetch failed)")
+        raise HTTPException(400, fetch_error or "No videos found in playlist (or fetch failed)")
 
     ids_seen = set()
     queued = 0
