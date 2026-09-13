@@ -7,8 +7,13 @@ If .bak already exists: deletes current .mp3 and re-converts from .bak."""
 import subprocess
 import os
 import sys
+from pathlib import Path
 
-CACHE_DIR = "/home/user/projects/drivepod/cache"
+# Relative to this project's parent dir (shared DrivePod cache); override with GRABBY_OUTPUT_DIR env
+CACHE_DIR = os.environ.get(
+    "GRABBY_OUTPUT_DIR",
+    str(Path(__file__).resolve().parent.parent / "DrivePod" / "cache"),
+)
 BITRATE = "160k"
 SAMPLE_RATE = "44100"
 CHANNELS = 2

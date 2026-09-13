@@ -13,9 +13,9 @@ services:
     ports:
       - "8101:8101"
     volumes:
-      - /home/user/projects/drivepod/cache:/home/user/projects/drivepod/cache
-      - /home/user/projects/grabbytube/grabby-tracks.json:/app/grabby-tracks.json
-      - /home/user/projects/grabbytube/grabbytube.db:/app/grabbytube.db
+      - /home/user/projects/DrivePod/cache:/home/user/projects/DrivePod/cache
+      - /home/user/projects/GrabbyTube/grabby-tracks.json:/app/grabby-tracks.json
+      - /home/user/projects/GrabbyTube/grabbytube.db:/app/grabbytube.db
       - /lib/modules:/lib/modules:ro
       - ./static:/app/static
       - .:/app

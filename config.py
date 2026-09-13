@@ -3,8 +3,8 @@ from pydantic_settings import BaseSettings
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
 
-# Default: share DrivePod's cache directory
-DEFAULT_CACHE_DIR = str(Path("/home/user/projects/drivepod/cache").resolve())
+# Default: share DrivePod's cache directory (relative to this project; overridable via GRABBY_OUTPUT_DIR)
+DEFAULT_CACHE_DIR = str((PROJECT_ROOT / ".." / "DrivePod" / "cache").resolve())
 
 class Settings(BaseSettings):
     host: str = "0.0.0.0"
