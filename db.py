@@ -34,6 +34,10 @@ def init_db():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+        CREATE TABLE IF NOT EXISTS config (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        );
     """)
     # Migration: add artist column if it doesn't exist
     try:
@@ -45,6 +49,24 @@ def init_db():
     # Ensure catalog file exists
     if not CATALOG_PATH.exists():
         CATALOG_PATH.write_text("[]")
+
+
+def get_config(key: str, default: str | None = None) -> str | None:
+    conn = get_conn()
+    row = conn.execute("SELECT value FROM config WHERE key = ?", (key,)).fetchone()
+    conn.close()
+    return row["value"] if row else default
+
+
+def set_config(key: str, value: str) -> None:
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO config (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+    conn.commit()
+    conn.close()
 
 
 def is_video_exists(video_id: str) -> bool:

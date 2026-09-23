@@ -16,7 +16,7 @@ from db import (
     init_db, enqueue_job, get_job, list_jobs,
     list_tracks, load_catalog, add_track, save_catalog,
     find_duplicates, batch_delete_tracks, get_cleaned_titles,
-    get_existing_video_ids,
+    get_existing_video_ids, set_config,
 )
 from processor import worker
 
@@ -744,8 +744,9 @@ class UserAgentRequest(BaseModel):
 
 @router.post("/settings/user-agent")
 async def set_user_agent(req: UserAgentRequest):
-    """Set the user agent for yt-dlp."""
+    """Set the user agent for yt-dlp (persisted in the database)."""
     settings.user_agent = req.user_agent
+    set_config("user_agent", req.user_agent)
     return {"status": "ok", "user_agent": settings.user_agent}
 
 @router.get("/settings/user-agent")
