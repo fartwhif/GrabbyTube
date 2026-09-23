@@ -1,5 +1,6 @@
 """GrabbyTube - YouTube to MP3 web app."""
 import logging
+import os
 from contextlib import asynccontextmanager
 from hmac import compare_digest
 
@@ -8,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import settings
-from db import init_db
+from db import init_db, get_config
 from api.routes import router, start_worker
 
 logging.basicConfig(
@@ -22,6 +23,10 @@ logger = logging.getLogger("grabbytube")
 async def lifespan(app: FastAPI):
     logger.info("GrabbyTube starting up...")
     init_db()
+    persisted_ua = get_config("user_agent")
+    if persisted_ua and "GRABBY_USER_AGENT" not in os.environ:
+        settings.user_agent = persisted_ua
+        logger.info("User agent restored from database")
     start_worker()
     logger.info(f"Output directory: {settings.output_path}")
     yield
