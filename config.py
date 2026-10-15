@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     audio_sample_rate: int = 44100  # 44.1 kHz (22050, 44100, 48000)
     audio_channels: int = 2  # 1 = mono, 2 = stereo
 
+    # tunester pipeline (separate container on the shared docker network)
+    tunester_url: str = "http://tunester:8102"
+    tunester_timeout: int = 3600  # max seconds to wait on one tunester job
+
     # LLM duplicate detection
     llm_api_key: str = ""
     llm_base_url: str = ""

@@ -343,6 +343,57 @@ h2 {
   margin-bottom: 12px;
 }
 
+/* Tunester selection + status */
+.track-card .track-select {
+  width: 16px;
+  height: 16px;
+  accent-color: #ff6b6b;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.tunester-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  font-size: 0.8rem;
+}
+
+.tunester-status[hidden] { display: none; }
+
+.tuned-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: #1a3a1a;
+  border: 1px solid #2a5a3a;
+  color: #44d46b;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
+.tunester-row {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #1a1a24;
+  border: 1px solid #2a2a35;
+}
+
+.tunester-row .tunester-msg { color: #888; }
+.tunester-row.done { border-color: #1a3a1a; }
+.tunester-row.done .tunester-msg { color: #44d46b; }
+.tunester-row.fixup { border-color: #3a3a1a; }
+.tunester-row.fixup .tunester-msg { color: #d4b844; }
+.tunester-row.error { border-color: #3a1a1a; }
+.tunester-row.error .tunester-msg { color: #d44444; }
+.tunester-row.running { border-color: #1a3a3a; }
+.tunester-row.running .tunester-msg { color: #44b8d4; }
+
 /* Cleaned titles box */
 .cleaned-titles-box {
   margin-bottom: 12px;

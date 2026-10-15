@@ -325,6 +325,7 @@ async def process_job(jid: int):
             "thumbnailPath": f"{video_id}/{video_id}-small.webp" if thumb_path else None,
             "audioPath": f"{video_id}/{video_id}.mp3",
             "duration": meta.get("duration", 0),
+            "tuned": False,
             "createdAt": datetime.now(timezone.utc).isoformat(),
         }
         json_path = video_dir / f"{video_id}.json"

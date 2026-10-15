@@ -186,6 +186,17 @@ def add_track(track: dict):
     save_catalog(catalog)
 
 
+def update_track(video_id: str, **fields) -> dict | None:
+    """Update fields on a catalog track by videoId. Returns the updated track."""
+    catalog = load_catalog()
+    for t in catalog:
+        if t.get("videoId") == video_id:
+            t.update(fields)
+            save_catalog(catalog)
+            return t
+    return None
+
+
 def list_tracks(sort_by: str = "createdAt", reverse: bool = True) -> list[dict]:
     catalog = load_catalog()
     key_map = {
