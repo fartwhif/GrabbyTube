@@ -219,8 +219,10 @@ async function refreshTracks() {
 
     trackList.innerHTML = tracks.map(t => `
       <div class="track-card" id="track-${esc(t.videoId)}">
+        <input type="checkbox" class="track-select"
+          data-video-id="${escAttr(t.videoId)}" ${selectedTracks.has(t.videoId) ? 'checked' : ''}>
         <div class="track-info">
-          <div class="track-title">${esc(t.title)}</div>
+          <div class="track-title">${esc(t.title)}${t.tuned ? ' <span class="tuned-badge" title="Audio replaced via tunester">tuned</span>' : ''}</div>
           <div class="track-meta">
             ${esc(t.author)} &middot; ${fmtDuration(t.duration)}
           </div>
@@ -242,6 +244,101 @@ async function refreshTracks() {
 }
 
 sortSelect.addEventListener('change', refreshTracks);
+
+// --- Tunester (run selected tracks through the tunester pipeline) ---
+
+const selectedTracks = new Set();
+let tunesterActive = false;
+let tunesterPolling = false;
+
+const tunesterBtn = document.getElementById('tunester-btn');
+const tunesterStatus = document.getElementById('tunester-status');
+
+function updateTunesterBtn() {
+  if (!tunesterBtn) return;
+  tunesterBtn.disabled = !selectedTracks.size || tunesterActive;
+  tunesterBtn.textContent = selectedTracks.size
+    ? 'Run via tunester (' + selectedTracks.size + ')'
+    : 'Run via tunester';
+}
+
+function renderTunesterStatus(tracks) {
+  if (!tunesterStatus) return;
+  if (!tracks.length) {
+    tunesterStatus.hidden = true;
+    tunesterStatus.innerHTML = '';
+    return;
+  }
+  tunesterStatus.hidden = false;
+  tunesterStatus.innerHTML = tracks.map(t => {
+    const cls = { done: 'done', fixup: 'fixup', error: 'error', running: 'running' }[t.status] || '';
+    return `<div class="tunester-row ${cls}">${esc(t.name || t.video_id)} &mdash; ${esc(t.message || t.status)}</div>`;
+  }).join('');
+}
+
+document.addEventListener('change', (e) => {
+  if (!e.target.classList.contains('track-select')) return;
+  const vid = e.target.dataset.videoId;
+  if (e.target.checked) selectedTracks.add(vid);
+  else selectedTracks.delete(vid);
+  updateTunesterBtn();
+});
+
+if (tunesterBtn) {
+  tunesterBtn.addEventListener('click', async () => {
+    const ids = [...selectedTracks];
+    if (!ids.length) return;
+    if (!confirm('Run ' + ids.length + ' track(s) through tunester?\n\n' +
+      'Each track is re-fetched as a verified uncensored studio MP3 ' +
+      'and its artist/title are fixed up. This can take a while per track.')) return;
+    tunesterActive = true;
+    updateTunesterBtn();
+    renderTunesterStatus(ids.map(id => ({ video_id: id, name: id, status: 'queued', message: 'queued' })));
+    try {
+      await api('/tracks/tunester', { method: 'POST', body: JSON.stringify({ video_ids: ids }) });
+      pollTunesterStatus();
+    } catch (err) {
+      alert('Tunester run failed: ' + err.message);
+      tunesterActive = false;
+      updateTunesterBtn();
+    }
+  });
+}
+
+function pollTunesterStatus() {
+  if (tunesterPolling) return;
+  tunesterPolling = true;
+  api('/tracks/tunester').then(st => {
+    renderTunesterStatus(st.tracks);
+    if (!st.active) {
+      tunesterActive = false;
+      updateTunesterBtn();
+      tunesterPolling = false;
+      refreshTracks();  // titles/authors may have changed
+      return;
+    }
+    tunesterActive = true;
+    updateTunesterBtn();
+    setTimeout(pollTunesterStatus, 5000);
+  }).catch(err => {
+    console.error('Tunester status failed:', err);
+    tunesterPolling = false;
+    setTimeout(pollTunesterStatus, 10000);
+  });
+}
+
+// Restore tunester run state after a page reload
+(async () => {
+  try {
+    const st = await api('/tracks/tunester');
+    if (st.tracks.length) renderTunesterStatus(st.tracks);
+    if (st.active) {
+      tunesterActive = true;
+      updateTunesterBtn();
+      pollTunesterStatus();
+    }
+  } catch (e) { console.error('Tunester status load failed:', e); }
+})();
 
 // --- Event delegation ---
 

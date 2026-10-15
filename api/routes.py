@@ -19,6 +19,7 @@ from db import (
     get_existing_video_ids, set_config,
 )
 from processor import worker
+import tunester
 
 logger = logging.getLogger("grabbytube")
 router = APIRouter()
@@ -280,6 +281,10 @@ class BatchQueueRequest(BaseModel):
 class TrackListRequest(BaseModel):
     sort_by: str = "createdAt"
     reverse: bool = True
+
+
+class TunesterRunRequest(BaseModel):
+    video_ids: list[str]
 
 
 class BatchDeleteRequest(BaseModel):
@@ -568,6 +573,32 @@ async def rebuild_tracks():
             updated += 1
     save_catalog(catalog)
     return {"rebuilt": updated, "total": len(catalog)}
+
+
+# --- Tunester (run catalog tracks through the tunester pipeline) ---
+
+@router.post("/tracks/tunester")
+async def run_tracks_through_tunester(req: TunesterRunRequest):
+    """Send selected catalog tracks through tunester, one at a time.
+
+    Replaces each track's MP3 with tunester's verified delivery and applies
+    the artist/title/year fixup (item title becomes "TITLE (YEAR)" when the
+    year is known). If tunester has fixup data but no usable file, only the
+    artist/title/year are updated.
+    """
+    try:
+        ids = tunester.start(req.video_ids)
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"started": len(ids), "video_ids": ids}
+
+
+@router.get("/tracks/tunester")
+async def tunester_run_status():
+    """Progress of the current/latest tunester batch."""
+    return tunester.get_status()
 
 
 # --- Serve audio files ---
