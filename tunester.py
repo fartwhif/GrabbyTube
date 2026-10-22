@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import time
 from pathlib import Path
 
@@ -49,6 +50,8 @@ def start(video_ids: list[str]) -> list[str]:
     ids = [v for v in dict.fromkeys(video_ids) if v in catalog]
     if not ids:
         raise ValueError("no known tracks selected")
+    # Enqueue in a random order so the batch doesn't track library order.
+    random.shuffle(ids)
     _progress.clear()
     for vid in ids:
         t = catalog[vid]
@@ -177,7 +180,29 @@ async def _replace_file(session: aiohttp.ClientSession, base: str, jid: str,
             async for chunk in r.content.iter_chunked(1 << 20):
                 f.write(chunk)
         os.replace(tmp, mp3_path)
+    _invalidate_transcode_sidecar(vid)
     logger.info(f"replaced {mp3_path} with tunester delivery")
+
+
+def _invalidate_transcode_sidecar(vid: str) -> None:
+    """Remove a stale FrogRock transcode sidecar for this track's MP3.
+
+    FrogRock caches a transcode of each non-target original as
+    ``<vid>.mp3.tr64k.mp3`` alongside the source. When tunester replaces the
+    source, that derivative was built from the *old* audio and is no longer
+    a valid cache of the new one — delete it so the next play rebuilds a
+    fresh transcode from the current source. Best-effort: a missing sidecar
+    (nothing ever transcoded) is not an error.
+    """
+    sidecar = settings.output_path / vid / f"{vid}.mp3.tr64k.mp3"
+    if not sidecar.exists():
+        return
+    try:
+        sidecar.unlink()
+    except OSError as e:
+        logger.warning(f"could not remove transcode sidecar {sidecar}: {e}")
+        return
+    logger.info(f"invalidated transcode sidecar {sidecar}")
 
 
 def apply_fixup(vid: str, track: dict, artist: str, title: str,

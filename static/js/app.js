@@ -220,7 +220,7 @@ async function refreshTracks() {
     trackList.innerHTML = tracks.map(t => `
       <div class="track-card" id="track-${esc(t.videoId)}">
         <input type="checkbox" class="track-select"
-          data-video-id="${escAttr(t.videoId)}" ${selectedTracks.has(t.videoId) ? 'checked' : ''}>
+          data-video-id="${escAttr(t.videoId)}" data-tuned="${t.tuned ? 'true' : ''}" ${selectedTracks.has(t.videoId) ? 'checked' : ''}>
         <div class="track-info">
           <div class="track-title">${esc(t.title)}${t.tuned ? ' <span class="tuned-badge" title="Audio replaced via tunester">tuned</span>' : ''}</div>
           <div class="track-meta">
@@ -283,6 +283,24 @@ document.addEventListener('change', (e) => {
   else selectedTracks.delete(vid);
   updateTunesterBtn();
 });
+
+// Replace the current selection with every track card (optionally filtered)
+// rendered in the library list.
+function selectTracks(match) {
+  selectedTracks.clear();
+  document.querySelectorAll('.track-select').forEach(b => {
+    const on = match ? match(b) : true;
+    b.checked = on;
+    if (on) selectedTracks.add(b.dataset.videoId);
+  });
+  updateTunesterBtn();
+}
+
+const selectAllBtn = document.getElementById('select-all-btn');
+const selectUntunedBtn = document.getElementById('select-untuned-btn');
+if (selectAllBtn) selectAllBtn.addEventListener('click', () => selectTracks());
+if (selectUntunedBtn)
+  selectUntunedBtn.addEventListener('click', () => selectTracks(b => !b.dataset.tuned));
 
 if (tunesterBtn) {
   tunesterBtn.addEventListener('click', async () => {
