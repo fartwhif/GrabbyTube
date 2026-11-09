@@ -250,9 +250,11 @@ sortSelect.addEventListener('change', refreshTracks);
 const selectedTracks = new Set();
 let tunesterActive = false;
 let tunesterPolling = false;
+let queueClearing = false;  // holds the 5s poll off during a queue clear
 
 const tunesterBtn = document.getElementById('tunester-btn');
 const tunesterStatus = document.getElementById('tunester-status');
+const clearQueueBtn = document.getElementById('clear-queue-btn');
 
 function updateTunesterBtn() {
   if (!tunesterBtn) return;
@@ -262,18 +264,27 @@ function updateTunesterBtn() {
     : 'Run via tunester';
 }
 
+// The clear button mirrors the list it empties: enabled only while the
+// progress panel has rows, and its label carries the row count.
+function updateQueueBtn(rows) {
+  if (!clearQueueBtn) return;
+  clearQueueBtn.disabled = !rows || queueClearing;
+  clearQueueBtn.textContent = rows ? 'Clear Queue (' + rows + ')' : 'Clear Queue';
+}
+
 function renderTunesterStatus(tracks) {
   if (!tunesterStatus) return;
   if (!tracks.length) {
     tunesterStatus.hidden = true;
     tunesterStatus.innerHTML = '';
-    return;
+  } else {
+    tunesterStatus.hidden = false;
+    tunesterStatus.innerHTML = tracks.map(t => {
+      const cls = { done: 'done', fixup: 'fixup', error: 'error', running: 'running' }[t.status] || '';
+      return `<div class="tunester-row ${cls}">${esc(t.name || t.video_id)} &mdash; ${esc(t.message || t.status)}</div>`;
+    }).join('');
   }
-  tunesterStatus.hidden = false;
-  tunesterStatus.innerHTML = tracks.map(t => {
-    const cls = { done: 'done', fixup: 'fixup', error: 'error', running: 'running' }[t.status] || '';
-    return `<div class="tunester-row ${cls}">${esc(t.name || t.video_id)} &mdash; ${esc(t.message || t.status)}</div>`;
-  }).join('');
+  updateQueueBtn(tracks.length);
 }
 
 document.addEventListener('change', (e) => {
@@ -330,6 +341,40 @@ if (clearTunedBtn) {
   });
 }
 
+// Empty the tunester progress list: cancels the batch (tracks tunester has
+// not been asked about yet are never sent) and clears the panel. MP3s and
+// fixups the run already applied stay applied.
+if (clearQueueBtn) {
+  clearQueueBtn.addEventListener('click', async () => {
+    const rows = tunesterStatus
+      ? tunesterStatus.querySelectorAll('.tunester-row').length : 0;
+    const msg = tunesterActive
+      ? 'Cancel the running tunester batch and empty the list?\n\n' +
+        rows + ' track(s) are listed. Tracks tunester has not started yet ' +
+        'will not be sent; MP3s and fixups already applied stay applied.'
+      : 'Empty the tunester list (' + rows + ' track(s))?\n\n' +
+        'Nothing is running - this just clears the results list.';
+    if (!confirm(msg)) return;
+    queueClearing = true;
+    tunesterPolling = true;   // hold the 5s poll off until the clear lands
+    updateQueueBtn(rows);
+    clearQueueBtn.textContent = 'Clearing...';
+    try {
+      const res = await api('/tracks/tunester/clear', { method: 'POST' });
+      tunesterActive = false;
+      renderTunesterStatus((res && res.tracks) || []);
+      updateTunesterBtn();
+      if (res && res.cancelled_run) refreshTracks();  // partial results landed
+    } catch (err) {
+      alert('Clear queue failed: ' + err.message);
+      updateQueueBtn(rows);
+    } finally {
+      queueClearing = false;
+      tunesterPolling = false;
+    }
+  });
+}
+
 if (tunesterBtn) {
   tunesterBtn.addEventListener('click', async () => {
     const ids = [...selectedTracks];
@@ -354,7 +399,11 @@ if (tunesterBtn) {
 function pollTunesterStatus() {
   if (tunesterPolling) return;
   tunesterPolling = true;
+  if (queueClearing) { tunesterPolling = false; return; }
   api('/tracks/tunester').then(st => {
+    // A poll fired before a clear can land afterwards with pre-clear rows;
+    // the clear owns the panel while it is in flight.
+    if (queueClearing) { tunesterPolling = false; return; }
     renderTunesterStatus(st.tracks);
     if (!st.active) {
       tunesterActive = false;

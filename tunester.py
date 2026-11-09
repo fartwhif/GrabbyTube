@@ -29,6 +29,7 @@ from processor import _get_audio_metadata, update_index_file
 logger = logging.getLogger("grabbytube.tunester")
 
 POLL_INTERVAL = 5  # seconds between tunester job polls
+UPSTREAM_CLEAR_TIMEOUT = 15  # seconds to wait on tunester's own queue clear
 
 # Progress of the current/latest batch, keyed by video_id.
 _progress: dict[str, dict] = {}
@@ -179,10 +180,20 @@ async def _replace_file(session: aiohttp.ClientSession, base: str, jid: str,
         if r.status != 200:
             raise RuntimeError(f"tunester file download failed: HTTP {r.status}")
         tmp = mp3_path.with_suffix(".tunester.mp3")
-        with open(tmp, "wb") as f:
-            async for chunk in r.content.iter_chunked(1 << 20):
-                f.write(chunk)
-        os.replace(tmp, mp3_path)
+        try:
+            with open(tmp, "wb") as f:
+                async for chunk in r.content.iter_chunked(1 << 20):
+                    f.write(chunk)
+            os.replace(tmp, mp3_path)
+        finally:
+            # A failed/cancelled download leaves the partial delivery behind;
+            # without this it would sit in the track directory forever
+            # (os.replace already moved it out of the way on success).
+            if tmp.exists():
+                try:
+                    tmp.unlink()
+                except OSError as e:
+                    logger.warning(f"could not remove {tmp}: {e}")
     _invalidate_transcode_sidecar(vid)
     logger.info(f"replaced {mp3_path} with tunester delivery")
 
@@ -286,3 +297,52 @@ def clear_tuned_all() -> dict:
     logger.info(
         f"cleared tuned flag: {cleared} catalog track(s), {files} item JSON(s)")
     return {"cleared": cleared, "files": files}
+
+
+async def clear_run() -> dict:
+    """Empty the tunester queue: stop the batch, drop its progress rows.
+
+    Cancels the running batch (its not-yet-submitted tracks are never sent),
+    asks tunester to cancel its own jobs so the in-flight track stops burning
+    LLM/download work, then clears the progress panel. Work already applied
+    (replaced MP3s, fixups) is kept; tunester leaves its downloaded files in
+    place, so the clear only drops bookkeeping and queued work.
+    """
+    global _run_task
+    cancelled_run = _run_active()
+    if cancelled_run:
+        _run_task.cancel()
+        try:
+            await _run_task
+        except asyncio.CancelledError:
+            pass
+
+    upstream: int | None = None
+    base = settings.tunester_url.rstrip("/")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                    f"{base}/api/clear",
+                    timeout=aiohttp.ClientTimeout(total=UPSTREAM_CLEAR_TIMEOUT)
+            ) as r:
+                if r.status == 200:
+                    upstream = (await r.json()).get("cleared")
+                else:
+                    logger.warning(
+                        f"tunester queue clear failed: HTTP {r.status}")
+    except (aiohttp.ClientError, OSError) as e:
+        logger.warning(f"tunester queue clear failed: {e}")
+
+    rows = len(_progress)
+    _progress.clear()
+    _run_task = None
+    logger.info(
+        f"tunester queue cleared: run "
+        f"{'cancelled' if cancelled_run else 'idle'}, {rows} progress row(s), "
+        f"{upstream} upstream job(s)")
+    return {
+        "cancelled_run": cancelled_run,
+        "rows": rows,
+        "upstream_jobs": upstream,
+        "tracks": list(_progress.values()),
+    }

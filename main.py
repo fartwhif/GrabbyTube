@@ -45,7 +45,8 @@ PROTECTED_DELETE_PATHS = (
 )
 PROTECTED_POST_PATHS = (
     "/tracks/batch-delete",
-    "/tracks/clear-tuned",  # library-wide tuned-flag reset
+    "/tracks/clear-tuned",       # library-wide tuned-flag reset
+    "/tracks/tunester/clear",    # cancels a running tunester batch
 )
 
 
