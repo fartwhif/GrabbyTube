@@ -601,6 +601,20 @@ async def tunester_run_status():
     return tunester.get_status()
 
 
+@router.post("/tracks/clear-tuned")
+async def clear_tuned_flags():
+    """Strip the tuned flag from every track in the library.
+
+    Clears the catalog field, the per-item metadata JSONs and the rebuilt
+    DrivePod index; the MP3s themselves are untouched, so every track is a
+    tunester candidate again.
+    """
+    try:
+        return tunester.clear_tuned_all()
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+
+
 # --- Serve audio files ---
 
 @router.get("/audio/{video_id}")

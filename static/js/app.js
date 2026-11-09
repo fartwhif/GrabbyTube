@@ -302,6 +302,34 @@ if (selectAllBtn) selectAllBtn.addEventListener('click', () => selectTracks());
 if (selectUntunedBtn)
   selectUntunedBtn.addEventListener('click', () => selectTracks(b => !b.dataset.tuned));
 
+// Strip the tuned flag from every track (catalog + per-item JSONs + index).
+// The MP3s keep whatever tunester delivered; only the bookkeeping is reset,
+// so every track becomes a tunester candidate again.
+const clearTunedBtn = document.getElementById('clear-tuned-btn');
+if (clearTunedBtn) {
+  clearTunedBtn.addEventListener('click', async () => {
+    const msg = 'Remove the tuned flag from ALL tracks?\n\n' +
+      'The audio files are not touched - tunester deliveries stay in place. ' +
+      'Every track just becomes eligible for "Select UnTuned" again.';
+    if (!confirm(msg)) return;
+    clearTunedBtn.disabled = true;
+    clearTunedBtn.textContent = 'Clearing...';
+    try {
+      const res = await api('/tracks/clear-tuned', { method: 'POST' });
+      await refreshTracks();
+      updateTunesterBtn();
+      clearTunedBtn.textContent = (res && res.cleared)
+        ? 'Cleared ' + res.cleared : 'Clear Tuned';
+      setTimeout(() => { clearTunedBtn.textContent = 'Clear Tuned'; }, 3000);
+    } catch (err) {
+      alert('Clear tuned failed: ' + err.message);
+      clearTunedBtn.textContent = 'Clear Tuned';
+    } finally {
+      clearTunedBtn.disabled = false;
+    }
+  });
+}
+
 if (tunesterBtn) {
   tunesterBtn.addEventListener('click', async () => {
     const ids = [...selectedTracks];
