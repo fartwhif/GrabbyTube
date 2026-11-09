@@ -23,7 +23,7 @@ from pathlib import Path
 import aiohttp
 
 from config import settings
-from db import load_catalog, update_track
+from db import load_catalog, save_catalog, update_track
 from processor import _get_audio_metadata, update_index_file
 
 logger = logging.getLogger("grabbytube.tunester")
@@ -35,16 +35,19 @@ _progress: dict[str, dict] = {}
 _run_task: asyncio.Task | None = None
 
 
+def _run_active() -> bool:
+    return bool(_run_task is not None and not _run_task.done())
+
+
 def get_status() -> dict:
     """Progress snapshot for the UI (current or last batch)."""
-    active = bool(_run_task is not None and not _run_task.done())
-    return {"active": active, "tracks": list(_progress.values())}
+    return {"active": _run_active(), "tracks": list(_progress.values())}
 
 
 def start(video_ids: list[str]) -> list[str]:
     """Start a background batch run. Returns the accepted video_ids."""
     global _run_task
-    if _run_task is not None and not _run_task.done():
+    if _run_active():
         raise RuntimeError("a tunester run is already in progress")
     catalog = {t["videoId"]: t for t in load_catalog() if t.get("videoId")}
     ids = [v for v in dict.fromkeys(video_ids) if v in catalog]
@@ -240,3 +243,46 @@ def mark_tuned(vid: str) -> None:
         json_path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
     update_track(vid, tuned=True)
     logger.info(f"marked {vid} as tuned (audio replaced via tunester)")
+
+
+def clear_tuned_all() -> dict:
+    """Strip the tuned flag from every track: catalog, per-item JSONs, index.
+
+    Only the bookkeeping goes - the MP3s keep whatever tunester delivered, so
+    every track becomes a tunester candidate again (its badge disappears and
+    "Select UnTuned" starts matching it).
+    """
+    if _run_active():
+        raise RuntimeError("a tunester run is already in progress")
+
+    catalog = load_catalog()
+    cleared = sum(1 for t in catalog if t.get("tuned"))
+    for t in catalog:
+        if "tuned" in t:
+            t["tuned"] = False
+    save_catalog(catalog)
+
+    files = 0
+    for subdir in sorted(settings.output_path.iterdir()):
+        if not subdir.is_dir():
+            continue
+        meta_file = subdir / f"{subdir.name}.json"
+        if not meta_file.exists():
+            continue
+        try:
+            data = json.loads(meta_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not data.get("tuned"):
+            continue
+        try:
+            data["tuned"] = False
+            meta_file.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+            files += 1
+        except OSError:
+            logger.warning(f"could not rewrite {meta_file}")
+
+    update_index_file()
+    logger.info(
+        f"cleared tuned flag: {cleared} catalog track(s), {files} item JSON(s)")
+    return {"cleared": cleared, "files": files}

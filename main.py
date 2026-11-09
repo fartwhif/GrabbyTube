@@ -37,10 +37,15 @@ app = FastAPI(title="GrabbyTube", lifespan=lifespan)
 
 # Destructive endpoints require a shared secret (X-Grabby-Token header) when
 # GRABBY_API_TOKEN is set. Protects the public API (grabbytube.example.com) from
-# arbitrary track deletion; DrivePod sends the same token from its .env.
+# arbitrary track deletion / library-wide flag resets; DrivePod sends the same
+# token from its .env.
 PROTECTED_DELETE_PATHS = (
     "/tracks/",          # DELETE /tracks/{video_id}, POST /tracks/batch-delete
     "/jobs",             # DELETE /jobs, /jobs/all
+)
+PROTECTED_POST_PATHS = (
+    "/tracks/batch-delete",
+    "/tracks/clear-tuned",  # library-wide tuned-flag reset
 )
 
 
@@ -49,7 +54,7 @@ async def verify_delete_token(request: Request, call_next):
     path = request.url.path
     is_destructive = (
         request.method == "DELETE" and path.startswith(PROTECTED_DELETE_PATHS)
-    ) or (request.method == "POST" and path == "/tracks/batch-delete")
+    ) or (request.method == "POST" and path in PROTECTED_POST_PATHS)
     if is_destructive and settings.api_token and not compare_digest(request.headers.get("x-grabby-token", ""), settings.api_token):
         return JSONResponse(status_code=401, content={"detail": "Invalid or missing token"})
     return await call_next(request)
