@@ -601,6 +601,16 @@ async def tunester_run_status():
     return tunester.get_status()
 
 
+@router.post("/tracks/tunester/clear")
+async def clear_tunester_queue():
+    """Empty the tunester queue: cancel the batch, drop its progress rows.
+
+    Tracks that tunester has not been asked about yet are simply never sent;
+    MP3s and fixups already applied by the run are kept.
+    """
+    return await tunester.clear_run()
+
+
 @router.post("/tracks/clear-tuned")
 async def clear_tuned_flags():
     """Strip the tuned flag from every track in the library.
