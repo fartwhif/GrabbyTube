@@ -13,14 +13,17 @@ services:
     ports:
       - "8101:8101"
     volumes:
-      - /home/user/projects/DrivePod/cache:/home/user/projects/DrivePod/cache
-      - /home/user/projects/GrabbyTube/grabby-tracks.json:/app/grabby-tracks.json
-      - /home/user/projects/GrabbyTube/grabbytube.db:/app/grabbytube.db
+      # Host sides are repo-relative (no machine identity); the shared cache is
+      # the sibling DrivePod cache dir, reached as /cache inside the container
+      # (GRABBY_OUTPUT_DIR in .env).
+      - ../DrivePod/cache:/cache
+      - ./grabby-tracks.json:/app/grabby-tracks.json
+      - ./grabbytube.db:/app/grabbytube.db
       - /lib/modules:/lib/modules:ro
       - ./static:/app/static
       - .:/app
       - ./data:/app/data
-      - /home/user/projects/ytcookies/data:/shared-cookies
+      - ../ytcookies/data:/shared-cookies
     env_file:
       - .env
     depends_on:
