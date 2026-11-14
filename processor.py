@@ -9,10 +9,13 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+import mutagen
+from mutagen.id3 import Encoding, TPE1, TIT2
+
 import yt_dlp
 
 from config import settings
-from db import get_job, update_job, get_pending_jobs, add_track
+from db import get_job, update_job, get_pending_jobs, add_track, load_catalog, update_track
 
 logger = logging.getLogger("grabbytube.processor")
 
@@ -77,6 +80,63 @@ def update_index_file():
     items.sort(key=lambda t: t.get("createdAt", ""), reverse=True)
     index_path.write_text(json.dumps(items, indent=2, ensure_ascii=False))
     logger.info(f"Index rebuilt: {len(items)} items -> {index_path}")
+
+
+def _write_mp3_tags(mp3_path: Path, artist: str, title: str) -> None:
+    """Rewrite the ID3 title/artist frames in place, audio bytes untouched.
+
+    mutagen replaces only the tag block, so the frame stream (and its Xing
+    header) stays byte-identical - a re-encode would churn the file. The save
+    bumps the mtime, which is how FrogRock's transcode sidecar
+    (<vid>.mp3.tr64k.mp3) notices the source changed and rebuilds it. A file
+    with no tag gets a fresh ID3v2.4 tag. Other frames (album/date/genre/TXXX
+    leftovers) are kept.
+    """
+    audio = mutagen.File(mp3_path)
+    if audio is None:
+        raise RuntimeError(f"unrecognized audio file: {mp3_path.name}")
+    if audio.tags is None:
+        audio.add_tags()
+    audio.tags.add(TIT2(encoding=Encoding.UTF8, text=[title]))
+    if artist:
+        audio.tags.add(TPE1(encoding=Encoding.UTF8, text=[artist]))
+    else:
+        audio.tags.delall("TPE1")
+    audio.save()
+
+
+def apply_track_metadata(video_id: str, artist: str, title: str) -> dict:
+    """Overwrite a track's artist/title everywhere it is stored, verbatim.
+
+    Unlike the tunester fixup there is no year to compose, so the MP3 tags,
+    the per-item JSON (DrivePod's index source) and the GrabbyTube catalog all
+    get exactly what was typed - which is also what the next tunester run
+    queries as "Artist - Title". The caller rebuilds grabby-index.json.
+
+    Raises FileNotFoundError when the track is not in the catalog.
+    """
+    entry = next((t for t in load_catalog() if t.get("videoId") == video_id), None)
+    if entry is None:
+        raise FileNotFoundError(f"track not in catalog: {video_id}")
+
+    track_dir = settings.output_path / video_id
+    # Tags first: if the write fails, nothing else has been touched.
+    mp3_path = track_dir / f"{video_id}.mp3"
+    if mp3_path.exists():
+        _write_mp3_tags(mp3_path, artist, title)
+
+    json_path = track_dir / f"{video_id}.json"
+    if track_dir.is_dir():
+        try:
+            data = json.loads(json_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            data = dict(entry)
+        data["title"] = title
+        data["author"] = artist
+        json_path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+
+    logger.info(f"manual metadata edit for {video_id}: {artist} - {title}")
+    return update_track(video_id, title=title, author=artist)
 
 
 # Safe filename pattern

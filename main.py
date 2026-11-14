@@ -1,6 +1,7 @@
 """GrabbyTube - YouTube to MP3 web app."""
 import logging
 import os
+import re as _re
 from contextlib import asynccontextmanager
 from hmac import compare_digest
 
@@ -35,10 +36,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="GrabbyTube", lifespan=lifespan)
 
-# Destructive endpoints require a shared secret (X-Grabby-Token header) when
+# Guarded endpoints require a shared secret (X-Grabby-Token header) when
 # GRABBY_API_TOKEN is set. Protects the public API (grabbytube.example.com) from
-# arbitrary track deletion / library-wide flag resets; DrivePod sends the same
-# token from its .env.
+# arbitrary track deletion / name rewrites / library-wide flag resets; DrivePod
+# sends the same token from its .env.
 PROTECTED_DELETE_PATHS = (
     "/tracks/",          # DELETE /tracks/{video_id}, POST /tracks/batch-delete
     "/jobs",             # DELETE /jobs, /jobs/all
@@ -48,14 +49,19 @@ PROTECTED_POST_PATHS = (
     "/tracks/clear-tuned",       # library-wide tuned-flag reset
     "/tracks/tunester/clear",    # cancels a running tunester batch
 )
+# POST /tracks/{video_id}/meta rewrites that track's MP3 tags, item JSON and
+# catalog entry, so it is guarded like the destructive paths. Regex instead of
+# a prefix: "/tracks/" would also catch POST /tracks/tunester (a run request).
+_PROTECTED_POST_TRACK_META = _re.compile(r"^/tracks/[^/]+/meta$")
 
 
 @app.middleware("http")
-async def verify_delete_token(request: Request, call_next):
+async def verify_guarded_token(request: Request, call_next):
     path = request.url.path
     is_destructive = (
         request.method == "DELETE" and path.startswith(PROTECTED_DELETE_PATHS)
-    ) or (request.method == "POST" and path in PROTECTED_POST_PATHS)
+    ) or (request.method == "POST" and (path in PROTECTED_POST_PATHS
+                                        or _PROTECTED_POST_TRACK_META.match(path)))
     if is_destructive and settings.api_token and not compare_digest(request.headers.get("x-grabby-token", ""), settings.api_token):
         return JSONResponse(status_code=401, content={"detail": "Invalid or missing token"})
     return await call_next(request)
