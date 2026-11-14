@@ -331,6 +331,38 @@ h2 {
   margin-top: 2px;
 }
 
+/* Inline artist/title editor (replaces the track-info/actions blocks) */
+.track-edit {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.track-edit label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: #888;
+  white-space: nowrap;
+}
+.track-edit input[type="text"] {
+  flex: 1 1 180px;
+  min-width: 0;
+  padding: 7px 10px;
+  background: #0f0f13;
+  border: 1px solid #2a2a35;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.track-edit input[type="text"]:focus { border-color: #ff6b6b; }
+.edit-buttons { display: flex; gap: 6px; flex-shrink: 0; }
+
 .btn-danger {
   background: #d44;
   color: #fff;

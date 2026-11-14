@@ -295,6 +295,13 @@ class PlaylistQueueRequest(BaseModel):
     url: str
 
 
+class TrackMetaRequest(BaseModel):
+    # Manual artist/title override: stored verbatim (no year composition),
+    # so an empty artist means "query by title only" next tunester run.
+    artist: str = ""
+    title: str
+
+
 # --- Startup ---
 
 @router.on_event("startup")
@@ -663,6 +670,36 @@ async def serve_meta(video_id: str):
     if not fp.exists():
         raise HTTPException(404, "Metadata not found")
     return json.loads(fp.read_text())
+
+
+# --- Manual artist/title override ---
+
+@router.post("/tracks/{video_id}/meta")
+async def set_track_meta(video_id: str, req: TrackMetaRequest):
+    """Overwrite a track's artist and song title by hand.
+
+    Writes the typed strings verbatim into the MP3 ID3 tags (audio bytes
+    untouched), the per-item JSON (DrivePod's index source), the catalog and
+    grabby-index.json - so players, the library display and the next tunester
+    query ("Artist - Title") all agree. Requires the API token, like the
+    destructive endpoints.
+    """
+    from processor import apply_track_metadata, update_index_file
+
+    title = req.title.strip()
+    artist = req.artist.strip()
+    if not title:
+        raise HTTPException(400, "title must not be empty")
+    if len(title) > 300 or len(artist) > 300:
+        raise HTTPException(400, "artist/title too long")
+    try:
+        track = apply_track_metadata(video_id, artist, title)
+    except FileNotFoundError:
+        raise HTTPException(404, "Track not found")
+    except RuntimeError as e:
+        raise HTTPException(500, f"tag write failed: {e}")
+    update_index_file()
+    return track
 
 
 # --- Delete track ---

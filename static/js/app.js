@@ -211,6 +211,7 @@ async function refreshTracks() {
     const sort = sortSelect.value;
     const tracks = await api(`/tracks?sort_by=${sort}&reverse=true`);
     const trackList = document.getElementById('track-list');
+    if (editingTracks.size) return;  // don't repaint over in-progress typing
 
     if (!tracks.length) {
       trackList.innerHTML = '<div class="empty-msg">No tracks yet. Search and queue something!</div>';
@@ -232,6 +233,11 @@ async function refreshTracks() {
             data-video-id="${escAttr(t.videoId)}"
             data-title="${escAttr(t.title)}">Play</button>
           <a class="btn btn-secondary" href="${API}/audio/${encodeURIComponent(t.videoId)}" download>DL</a>
+          <button class="btn btn-secondary btn-edit-track"
+            data-video-id="${escAttr(t.videoId)}"
+            data-title="${escAttr(t.title)}"
+            data-artist="${escAttr(t.author)}"
+            data-tuned="${t.tuned ? 'true' : ''}">Edit</button>
           <button class="btn btn-danger btn-delete-track"
             data-video-id="${escAttr(t.videoId)}"
             data-title="${escAttr(t.title)}">Del</button>
@@ -513,6 +519,15 @@ document.addEventListener('click', async (e) => {
     return;
   }
 
+  // Edit button (tracks) - inline artist/title override
+  const editBtn = e.target.closest('.btn-edit-track');
+  if (editBtn) {
+    e.preventDefault();
+    startTrackEdit(editBtn.dataset.videoId, editBtn.dataset.artist,
+      editBtn.dataset.title, editBtn.dataset.tuned === 'true');
+    return;
+  }
+
   // Delete button (tracks)
   const delBtn = e.target.closest('.btn-delete-track');
   if (delBtn) {
@@ -588,6 +603,93 @@ batchBtn.addEventListener('click', async () => {
     batchBtn.disabled = false;
     batchBtn.textContent = 'Enqueue All';
   }
+});
+
+// --- Manual artist/title override ---
+
+// videoIds with an open editor: refreshTracks() skips its repaint while this
+// is non-empty, otherwise the 5s poll would wipe mid-typing.
+const editingTracks = new Set();
+
+function startTrackEdit(videoId, artist, title, tuned) {
+  const card = document.getElementById('track-' + videoId);
+  if (!card || editingTracks.has(videoId)) return;
+  editingTracks.add(videoId);
+  card.innerHTML = `
+    <input type="checkbox" class="track-select"
+      data-video-id="${escAttr(videoId)}" data-tuned="${tuned ? 'true' : ''}" ${selectedTracks.has(videoId) ? 'checked' : ''}>
+    <form class="track-edit" data-video-id="${escAttr(videoId)}">
+      <label>Song title
+        <input type="text" class="edit-title" value="${escAttr(title)}" maxlength="300" required></label>
+      <label>Artist
+        <input type="text" class="edit-artist" value="${escAttr(artist)}" maxlength="300"></label>
+      <span class="edit-buttons">
+        <button type="submit" class="btn btn-primary btn-save-edit">Save</button>
+        <button type="button" class="btn btn-secondary btn-cancel-edit">Cancel</button>
+      </span>
+    </form>
+    ${tuned ? '<span class="tuned-badge">tuned</span>' : ''}
+  `;
+  const titleInput = card.querySelector('.edit-title');
+  titleInput.focus();
+  titleInput.setSelectionRange(titleInput.value.length, titleInput.value.length);
+}
+
+function cancelTrackEdit(videoId) {
+  editingTracks.delete(videoId);
+  refreshTracks();
+}
+
+async function saveTrackEdit(videoId, artist, title) {
+  title = title.trim();
+  artist = artist.trim();
+  if (!title) return;
+  // Hold the 5s repaint off: on success the editor is replaced with the saved
+  // values, on failure it stays open with whatever was typed (Cancel to leave).
+  editingTracks.add(videoId);
+  const card = document.getElementById('track-' + videoId);
+  const saveBtn = card && card.querySelector('.btn-save-edit');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
+  try {
+    await api('/tracks/' + encodeURIComponent(videoId) + '/meta', {
+      method: 'POST',
+      body: JSON.stringify({ artist, title }),
+    });
+    editingTracks.delete(videoId);  // close first, else the guard eats repaint
+    refreshTracks();
+    refreshStats();
+  } catch (err) {
+    // Editor stays open with whatever was typed, so the save can be retried
+    // (token fixed in Settings) or cancelled.
+    alert('Save failed: ' + err.message);
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+  }
+}
+
+// Cancel button / Escape key.
+document.addEventListener('click', (e) => {
+  const cancelBtn = e.target.closest('.btn-cancel-edit');
+  if (!cancelBtn) return;
+  e.preventDefault();
+  cancelTrackEdit(cancelBtn.closest('.track-edit').dataset.videoId);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !editingTracks.size) return;
+  const form = document.activeElement && document.activeElement.closest('.track-edit');
+  if (form) cancelTrackEdit(form.dataset.videoId);
+});
+
+// Enter in either field (and the Save button) submits the edit form.
+document.addEventListener('submit', (e) => {
+  const form = e.target.closest('.track-edit');
+  if (!form) return;
+  e.preventDefault();
+  const saveBtn = form.querySelector('.btn-save-edit');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
+  saveTrackEdit(form.dataset.videoId,
+    form.querySelector('.edit-artist').value,
+    form.querySelector('.edit-title').value);
 });
 
 // --- Delete ---
