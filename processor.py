@@ -63,10 +63,31 @@ def _get_yt_dlp_base_flags() -> list[str]:
 
 
 def update_index_file():
-    """Rebuild output/grabby-index.json from all per-item metadata JSONs (DrivePod-style)."""
+    """Rebuild output/grabby-index.json from the item JSONs this app authored.
+
+    The output dir IS DrivePod's cache (shared mount), and DrivePod writes a
+    per-item JSON for every video it harvests. A bare folder sweep therefore
+    catalogued DrivePod's own YouTube videos into this index - and DrivePod read
+    it back as its music catalog, flipped its rows to isGrabby, and reset every
+    watched item among them to unwatched on each recondition, so videos the
+    owner had listened to months ago came back into the queue forever.
+
+    An entry is ours only when BOTH membership proofs hold: the item JSON
+    carries a non-empty ``createdAt`` (written here and by nothing else in that
+    directory - DrivePod's two sidecar writers omit it) AND the catalog lists
+    the videoId. The catalog is this app's membership list (download, delete,
+    batch-delete, meta edit and tunester all maintain it), so a DrivePod file
+    can never enter by acquiring a timestamp, and a track deleted here leaves in
+    the same rebuild. An entry with createdAt but no catalog record is reported
+    instead of silently dropped: that divergence means a catalog write failed,
+    which the operator must be able to see.
+    """
     output_dir = settings.output_path
     index_path = output_dir / "grabby-index.json"
+    catalog_ids = {t.get("videoId") for t in load_catalog()}
     items = []
+    foreign = 0
+    uncataloged = []
     for subdir in sorted(output_dir.iterdir()):
         if not subdir.is_dir():
             continue
@@ -74,12 +95,22 @@ def update_index_file():
         if meta_file.exists():
             try:
                 data = json.loads(meta_file.read_text())
-                items.append(data)
             except (json.JSONDecodeError, OSError):
                 pass
+            else:
+                vid = data.get("videoId")
+                if not str(data.get("createdAt", "")).strip():
+                    foreign += 1
+                    continue
+                if vid not in catalog_ids:
+                    uncataloged.append(vid or subdir.name)
+                    continue
+                items.append(data)
     items.sort(key=lambda t: t.get("createdAt", ""), reverse=True)
     index_path.write_text(json.dumps(items, indent=2, ensure_ascii=False))
-    logger.info(f"Index rebuilt: {len(items)} items -> {index_path}")
+    note = f" (skipped {foreign} folder(s) authored by another app)" if foreign else ""
+    warn = f" [WARN] createdAt but not in catalog: {uncataloged[:8]}" if uncataloged else ""
+    logger.info(f"Index rebuilt: {len(items)} items -> {index_path}{note}{warn}")
 
 
 def _write_mp3_tags(mp3_path: Path, artist: str, title: str) -> None:
