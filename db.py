@@ -286,7 +286,7 @@ async def find_duplicates() -> list[dict]:
         "Content-Type": "application/json",
     }
     body = {
-        "model": "qwen3.6-27b",
+        "model": settings.llm_model,
         "messages": [
             {"role": "system", "content": "You are a music library assistant. Output only a JSON object with a 'duplicates' key. No other text."},
             {"role": "user", "content": user_prompt},
