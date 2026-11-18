@@ -397,6 +397,16 @@ if (tunesterBtn) {
     } catch (err) {
       alert('Tunester run failed: ' + err.message);
       tunesterActive = false;
+      // The optimistic rows above belong to a run that never started, so the
+      // server's list (the batch that refused us, or the last finished one)
+      // replaces them - otherwise the panel keeps phantom "queued" entries the
+      // backend knows nothing about until the next reload.
+      api('/tracks/tunester')
+        .then(st => {
+          renderTunesterStatus(st.tracks);
+          if (st.active) { tunesterActive = true; pollTunesterStatus(); }
+        })
+        .catch(e => { console.error('Tunester status load failed:', e); renderTunesterStatus([]); });
       updateTunesterBtn();
     }
   });
