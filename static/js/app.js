@@ -232,6 +232,10 @@ async function refreshTracks() {
           <button class="btn btn-play btn-play-track"
             data-video-id="${escAttr(t.videoId)}"
             data-title="${escAttr(t.title)}">Play</button>
+          <a class="btn btn-secondary btn-yt-track"
+            href="https://www.youtube.com/watch?v=${encodeURIComponent(t.videoId)}"
+            target="_blank" rel="noopener"
+            title="Open the original YouTube video">YT</a>
           <a class="btn btn-secondary" href="${API}/audio/${encodeURIComponent(t.videoId)}" download>DL</a>
           <button class="btn btn-secondary btn-edit-track"
             data-video-id="${escAttr(t.videoId)}"
