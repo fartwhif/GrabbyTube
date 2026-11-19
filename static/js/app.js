@@ -260,7 +260,18 @@ sortSelect.addEventListener('change', refreshTracks);
 const selectedTracks = new Set();
 let tunesterActive = false;
 let tunesterPolling = false;
-let queueClearing = false;  // holds the 5s poll off during a queue clear
+let queueClearing = false;    // holds every read off while a clear is in flight
+let panelGen = 0;             // bumped by a clear, so a stale answer is dropped
+let tunesterNextPoll = 0;     // epoch ms of the next /tracks/tunester read
+let tunesterRowsHtml = '';    // last panel body drawn, so a poll can skip it
+// How often the panel re-reads /tracks/tunester, chosen by what the last
+// answer said. The read costs one in-memory dict snapshot on the backend, so
+// a fast tick is cheap - and it is the DEADLINE (not a per-request timer) that
+// makes a raised rate safe: a throttled hidden tab clamps the tick, it cannot
+// skip a read that is already overdue.
+const POLL_FAST = 2000;   // a batch is live (its row moves every 5 s at most)
+const POLL_IDLE = 10000;  // nothing running here: still learn of a batch elsewhere
+const POLL_DOWN = 30000;  // GrabbyTube itself is not answering
 
 const tunesterBtn = document.getElementById('tunester-btn');
 const tunesterStatus = document.getElementById('tunester-status');
@@ -282,17 +293,29 @@ function updateQueueBtn(rows) {
   clearQueueBtn.textContent = rows ? 'Clear Queue (' + rows + ')' : 'Clear Queue';
 }
 
+// When the next /tracks/tunester read is due, in epoch ms. A deadline the tick
+// re-reads, not a self-rearming setTimeout chain: a chain lives or dies with
+// one browser-owned timer, and a hidden tab gets its timers clamped (1/s, then
+// about 1/min), so a chain armed while visible dies on its first clamped wake
+// and the panel stays frozen for the rest of the batch. A missed tick only
+// delays a deadline - the next tick finds it overdue and reads at once.
+function setTunesterNextPoll(ms) {
+  tunesterNextPoll = Date.now() + ms;
+}
+
 function renderTunesterStatus(tracks) {
   if (!tunesterStatus) return;
-  if (!tracks.length) {
-    tunesterStatus.hidden = true;
-    tunesterStatus.innerHTML = '';
-  } else {
-    tunesterStatus.hidden = false;
-    tunesterStatus.innerHTML = tracks.map(t => {
-      const cls = { done: 'done', fixup: 'fixup', error: 'error', running: 'running' }[t.status] || '';
-      return `<div class="tunester-row ${cls}">${esc(t.name || t.video_id)} &mdash; ${esc(t.message || t.status)}</div>`;
-    }).join('');
+  // A poll that changed nothing must not rewrite the panel: innerHTML wipes
+  // scroll position and any text the operator is selecting, and with polls now
+  // running continuously that would mean a flinging list every two seconds.
+  const rows = tracks.map(t => {
+    const cls = { done: 'done', fixup: 'fixup', error: 'error', running: 'running' }[t.status] || '';
+    return `<div class="tunester-row ${cls}">${esc(t.name || t.video_id)} &mdash; ${esc(t.message || t.status)}</div>`;
+  }).join('');
+  if (rows !== tunesterRowsHtml) {
+    tunesterRowsHtml = rows;
+    tunesterStatus.hidden = !rows;
+    tunesterStatus.innerHTML = rows;
   }
   updateQueueBtn(tracks.length);
 }
@@ -365,8 +388,8 @@ if (clearQueueBtn) {
       : 'Empty the tunester list (' + rows + ' track(s))?\n\n' +
         'Nothing is running - this just clears the results list.';
     if (!confirm(msg)) return;
-    queueClearing = true;
-    tunesterPolling = true;   // hold the 5s poll off until the clear lands
+    panelGen++;            // invalidates any read already in flight
+    queueClearing = true;  // the clear owns the panel until it lands
     updateQueueBtn(rows);
     clearQueueBtn.textContent = 'Clearing...';
     try {
@@ -380,7 +403,11 @@ if (clearQueueBtn) {
       updateQueueBtn(rows);
     } finally {
       queueClearing = false;
-      tunesterPolling = false;
+      // Reads were suppressed for the clear's whole duration (up to tunester's
+      // timeout, or at once on a bad token) and the panel already shows the
+      // clear's own answer, so resume at the idle rate instead of on a deadline
+      // left over from the batch that was just cleared.
+      setTunesterNextPoll(POLL_IDLE);
     }
   });
 }
@@ -417,43 +444,49 @@ if (tunesterBtn) {
 }
 
 function pollTunesterStatus() {
-  if (tunesterPolling) return;
+  if (tunesterPolling || queueClearing) return;  // the clear owns the panel
   tunesterPolling = true;
-  if (queueClearing) { tunesterPolling = false; return; }
+  // The generation is taken BEFORE the request: a clear that happens while
+  // this read is in flight makes its answer stale, and dropping it is what
+  // keeps cleared rows from being painted back over the empty panel.
+  const gen = panelGen;
   api('/tracks/tunester').then(st => {
-    // A poll fired before a clear can land afterwards with pre-clear rows;
-    // the clear owns the panel while it is in flight.
-    if (queueClearing) { tunesterPolling = false; return; }
+    tunesterPolling = false;  // always, or a dropped answer would stop polling
+    // Either drop reason still re-arms: leaving the deadline in the past would
+    // make the tick read every second instead of at the rate above.
+    if (queueClearing || gen !== panelGen) { setTunesterNextPoll(POLL_IDLE); return; }
+    setTunesterNextPoll(st.active ? POLL_FAST : POLL_IDLE);
     renderTunesterStatus(st.tracks);
-    if (!st.active) {
-      tunesterActive = false;
+    if (st.active) {
+      // A batch this tab never started (another window on the same partition,
+      // or a process restart that resumed the saved queue) becomes this tab's
+      // active batch here: the button locks, the panel moves, no reload needed.
+      tunesterActive = true;
       updateTunesterBtn();
-      tunesterPolling = false;
-      refreshTracks();  // titles/authors may have changed
       return;
     }
-    tunesterActive = true;
-    updateTunesterBtn();
-    setTimeout(pollTunesterStatus, 5000);
+    if (tunesterActive) {
+      tunesterActive = false;
+      updateTunesterBtn();
+      refreshTracks();  // titles/authors may have changed
+    }
   }).catch(err => {
-    console.error('Tunester status failed:', err);
     tunesterPolling = false;
-    setTimeout(pollTunesterStatus, 10000);
+    // No alert: this read is background traffic and the panel keeps its
+    // last-known rows, so a blip must not interrupt the operator. Back off,
+    // else a stopped GrabbyTube is asked 30x/min for nothing.
+    console.error('Tunester status failed:', err);
+    setTunesterNextPoll(POLL_DOWN);
   });
 }
 
-// Restore tunester run state after a page reload
-(async () => {
-  try {
-    const st = await api('/tracks/tunester');
-    if (st.tracks.length) renderTunesterStatus(st.tracks);
-    if (st.active) {
-      tunesterActive = true;
-      updateTunesterBtn();
-      pollTunesterStatus();
-    }
-  } catch (e) { console.error('Tunester status load failed:', e); }
-})();
+// The tick that owns this panel's clock (see setTunesterNextPoll): it reads
+// whenever the deadline is past, so page load starts the first read and every
+// later read happens at the rate the last answer asked for.
+setInterval(() => {
+  if (Date.now() < tunesterNextPoll) return;
+  pollTunesterStatus();
+}, 1000);
 
 // --- Event delegation ---
 
@@ -920,6 +953,9 @@ function poll() {
   refreshStats();
 }
 
+// No tunester read here: the queue panel ticks on its own (pollTunesterStatus)
+// at a rate that follows whether a batch is live.
+
 // --- Duplicates ---
 
 const duplicatesModal = document.getElementById('duplicates-modal');
@@ -1044,5 +1080,8 @@ async function deleteSelectedDuplicates() {
 // Initial load
 poll();
 loadCleanedTitles();
+// What paints a batch that survived a reload or a GrabbyTube restart; the 1s
+// tick then keeps the panel live on its own deadline.
+pollTunesterStatus();
 // Refresh every 5 seconds
 setInterval(poll, 5000);
